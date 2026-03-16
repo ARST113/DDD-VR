@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
+import top.rootu.dddplayer.bridge.BridgeConfig
+import top.rootu.dddplayer.bridge.BridgeMode
 import top.rootu.dddplayer.model.MediaItem
 import top.rootu.dddplayer.model.SubtitleItem
 
@@ -37,6 +39,23 @@ object IntentUtils {
 
         // 3. Пусто
         return Pair(emptyList(), 0)
+    }
+
+    fun parseBridgeConfig(intent: Intent): BridgeConfig {
+        val mode = when (intent.getStringExtra("bridge_mode")?.lowercase()) {
+            "broadcast" -> BridgeMode.BROADCAST
+            else -> BridgeMode.BROADCAST
+        }
+
+        return BridgeConfig(
+            enabled = intent.getBooleanExtra("bridge_enabled", false),
+            sessionId = intent.getStringExtra("bridge_session_id"),
+            mode = mode,
+            emitPosition = intent.getBooleanExtra("bridge_emit_position", true),
+            emitUserActions = intent.getBooleanExtra("bridge_emit_user_actions", true),
+            positionIntervalMs = intent.getLongExtra("bridge_position_interval_ms", 1000L),
+            client = intent.getStringExtra("bridge_client") ?: "lampa"
+        )
     }
 
     private fun parseSingleFile(context: Context, intent: Intent): Pair<List<MediaItem>, Int> {
