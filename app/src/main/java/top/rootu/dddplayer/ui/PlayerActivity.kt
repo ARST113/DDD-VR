@@ -21,6 +21,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.util.UnstableApi
 import top.rootu.dddplayer.BuildConfig
 import top.rootu.dddplayer.R
+import top.rootu.dddplayer.bridge.BridgeConfig
+import top.rootu.dddplayer.bridge.BridgeDispatcher
+import top.rootu.dddplayer.bridge.BridgeEvent
+import top.rootu.dddplayer.bridge.BroadcastTransport
 import top.rootu.dddplayer.utils.IntentUtils
 import top.rootu.dddplayer.viewmodel.PlayerViewModel
 
@@ -31,6 +35,9 @@ class PlayerActivity : AppCompatActivity() {
     private val viewModel: PlayerViewModel by viewModels()
     private var shouldReturnResult = false
     private var isCompleted = false
+    private var bridgeConfig = BridgeConfig()
+    private var bridgeDispatcher: BridgeDispatcher? = null
+    private var finishReason = "user"
     // Сохраняем Intent, чтобы обработать его после получения разрешения
     private var pendingIntent: Intent? = null
 
@@ -88,9 +95,12 @@ class PlayerActivity : AppCompatActivity() {
         hideSystemUI()
 
         viewModel.playbackEnded.observe(this) { ended ->
-            if (ended && shouldReturnResult) {
+            if (ended) {
                 isCompleted = true
-                finish() // Закрываем активити
+                finishReason = "completion"
+                if (shouldReturnResult) {
+                    finish() // Закрываем активити
+                }
             }
         }
 
@@ -161,11 +171,28 @@ class PlayerActivity : AppCompatActivity() {
         if (intent == null) return
 
         shouldReturnResult = intent.getBooleanExtra("return_result", false)
+        bridgeConfig = IntentUtils.parseBridgeConfig(intent)
+        bridgeDispatcher = if (bridgeConfig.enabled) {
+            BridgeDispatcher(bridgeConfig, BroadcastTransport(this))
+        } else {
+            null
+        }
 
         val (playlist, startIndex) = IntentUtils.parseIntent(this, intent)
         when {
             playlist.isNotEmpty() -> {
                 viewModel.loadPlaylist(playlist, startIndex)
+                viewModel.setBridgeDispatcher(bridgeDispatcher, bridgeConfig)
+                bridgeDispatcher?.emit(
+                    BridgeEvent.SessionStarted(
+                        sessionId = bridgeConfig.sessionId,
+                        ts = System.currentTimeMillis(),
+                        uri = playlist.getOrNull(startIndex)?.uri?.toString(),
+                        title = playlist.getOrNull(startIndex)?.title,
+                        playlistSize = playlist.size,
+                        startIndex = startIndex
+                    )
+                )
             }
             BuildConfig.DEBUG -> {
                 // Дефолтное видео для теста (только в DEBUG)
@@ -175,6 +202,7 @@ class PlayerActivity : AppCompatActivity() {
                     listOf(top.rootu.dddplayer.model.MediaItem(defaultUri.toUri())),
                     0
                 )
+                viewModel.setBridgeDispatcher(bridgeDispatcher, bridgeConfig)
             }
             else -> {
                 // В релизе, если нет данных, ничего не делаем.
@@ -215,20 +243,33 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun finish() {
         viewModel.saveCurrentSettings()
+
+        val duration = viewModel.player?.duration
+        val position = if (isCompleted) duration else viewModel.player?.currentPosition
+        val uri = viewModel.player?.currentMediaItem?.localConfiguration?.uri?.toString()
+
+        bridgeDispatcher?.emit(
+            BridgeEvent.SessionFinished(
+                sessionId = bridgeConfig.sessionId,
+                ts = System.currentTimeMillis(),
+                uri = uri,
+                position = position,
+                duration = duration,
+                endBy = finishReason
+            )
+        )
+
         if (shouldReturnResult) {
             val resultIntent = Intent("top.rootu.dddplayer.intent.result.VIEW")
 
             // Возвращаем URI текущего видео (полезно, если это был плейлист)
             resultIntent.data = viewModel.player?.currentMediaItem?.localConfiguration?.uri
 
-            val duration = viewModel.player?.duration
-            val position = if (isCompleted) duration else viewModel.player?.currentPosition
-
             resultIntent.putExtra("position", position)
             resultIntent.putExtra("duration", duration)
 
             // Сообщаем, закончилось ли видео само ("completion") или закрыл юзер ("user")
-            resultIntent.putExtra("end_by", if (isCompleted) "completion" else "user")
+            resultIntent.putExtra("end_by", finishReason)
 
             setResult(RESULT_OK, resultIntent)
         }
