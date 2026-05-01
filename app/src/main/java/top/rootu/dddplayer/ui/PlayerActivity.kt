@@ -18,11 +18,13 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import top.rootu.dddplayer.BuildConfig
 import top.rootu.dddplayer.R
 import top.rootu.dddplayer.bridge.BridgeConfig
 import top.rootu.dddplayer.bridge.BridgeDispatcher
+import top.rootu.dddplayer.bridge.BridgeMediaItem
 import top.rootu.dddplayer.bridge.BridgeEvent
 import top.rootu.dddplayer.bridge.BroadcastTransport
 import top.rootu.dddplayer.utils.IntentUtils
@@ -173,7 +175,7 @@ class PlayerActivity : AppCompatActivity() {
         shouldReturnResult = intent.getBooleanExtra("return_result", false)
         bridgeConfig = IntentUtils.parseBridgeConfig(intent)
         bridgeDispatcher = if (bridgeConfig.enabled) {
-            BridgeDispatcher(bridgeConfig, BroadcastTransport(this))
+            BridgeDispatcher(bridgeConfig, BroadcastTransport(this, bridgeConfig))
         } else {
             null
         }
@@ -181,16 +183,24 @@ class PlayerActivity : AppCompatActivity() {
         val (playlist, startIndex) = IntentUtils.parseIntent(this, intent)
         when {
             playlist.isNotEmpty() -> {
-                viewModel.loadPlaylist(playlist, startIndex)
                 viewModel.setBridgeDispatcher(bridgeDispatcher, bridgeConfig)
+                val current = playlist.getOrNull(startIndex)
+                val startPosition = current?.startPositionMs ?: 0L
+                viewModel.loadPlaylist(playlist, startIndex, startPosition)
                 bridgeDispatcher?.emit(
                     BridgeEvent.SessionStarted(
                         sessionId = bridgeConfig.sessionId,
                         ts = System.currentTimeMillis(),
-                        uri = playlist.getOrNull(startIndex)?.uri?.toString(),
-                        title = playlist.getOrNull(startIndex)?.title,
+                        uri = current?.uri?.toString(),
+                        title = current?.title,
                         playlistSize = playlist.size,
-                        startIndex = startIndex
+                        startIndex = startIndex,
+                        startPosition = current?.startPositionMs?.takeIf { it > 0 },
+                        currentItem = BridgeMediaItem(
+                            uri = current?.uri?.toString(),
+                            title = current?.title,
+                            filename = current?.filename
+                        )
                     )
                 )
             }
@@ -244,9 +254,10 @@ class PlayerActivity : AppCompatActivity() {
     override fun finish() {
         viewModel.saveCurrentSettings()
 
-        val duration = viewModel.player?.duration
-        val position = if (isCompleted) duration else viewModel.player?.currentPosition
-        val uri = viewModel.player?.currentMediaItem?.localConfiguration?.uri?.toString()
+        val p = viewModel.player
+        val duration = p?.duration
+        val position = if (isCompleted) duration else p?.currentPosition
+        val uri = p?.currentMediaItem?.localConfiguration?.uri?.toString()
 
         bridgeDispatcher?.emit(
             BridgeEvent.SessionFinished(
@@ -254,8 +265,11 @@ class PlayerActivity : AppCompatActivity() {
                 ts = System.currentTimeMillis(),
                 uri = uri,
                 position = position,
-                duration = duration,
-                endBy = finishReason
+                duration = duration?.let { if (it <= 0 || it == C.TIME_UNSET) null else it },
+                endBy = finishReason,
+                windowIndex = p?.currentMediaItemIndex,
+                playlistSize = p?.mediaItemCount,
+                title = p?.currentMediaItem?.mediaMetadata?.title?.toString()
             )
         )
 

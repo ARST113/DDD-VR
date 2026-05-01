@@ -53,8 +53,11 @@ object IntentUtils {
             mode = mode,
             emitPosition = intent.getBooleanExtra("bridge_emit_position", true),
             emitUserActions = intent.getBooleanExtra("bridge_emit_user_actions", true),
-            positionIntervalMs = intent.getLongExtra("bridge_position_interval_ms", 1000L),
-            client = intent.getStringExtra("bridge_client") ?: "lampa"
+            positionIntervalMs = intent.getLongExtra("bridge_position_interval_ms", 1000L).coerceAtLeast(250L),
+            client = intent.getStringExtra("bridge_client") ?: "lampa",
+            eventAction = intent.getStringExtra("bridge_event_action") ?: "top.rootu.dddplayer.bridge.EVENT",
+            receiverPackage = intent.getStringExtra("bridge_receiver_package"),
+            schemaVersion = intent.getIntExtra("bridge_schema_version", 1)
         )
     }
 
@@ -72,7 +75,7 @@ object IntentUtils {
             title = filename ?: uri.lastPathSegment ?: "Video"
         }
 
-        val startPosition = extras.getInt("position", 0).toLong()
+        val startPosition = getLongExtraCompat(extras, "position", 0L)
         // Single poster
         val singlePoster = extras.getString("thumbnail")
         // Single Video Subtitles
@@ -83,7 +86,7 @@ object IntentUtils {
             title = title,
             filename = filename,
             posterUri = singlePoster?.toUri(),
-            headers = emptyMap(),
+            headers = parseHeaders(extras),
             subtitles = singleSubs,
             startPositionMs = startPosition
         )
@@ -101,17 +104,10 @@ object IntentUtils {
         val posters = getSmartStringArray(extras, "video_list.thumbnail")
         val playlistSubsBundles = getParcelableArrayListCompat<Bundle>(extras, "video_list.subtitles")
 
-        // Headers
-        val headersMap = mutableMapOf<String, String>()
-        val headersArray = getSmartStringArray(extras, "headers")
-        if (headersArray != null) {
-            for (i in 0 until headersArray.size - 1 step 2) {
-                headersMap[headersArray[i]] = headersArray[i + 1]
-            }
-        }
+        val headersMap = parseHeaders(extras)
 
         val playlist = mutableListOf<MediaItem>()
-        var startIndex = 0
+        var startIndex = extras.getInt("start_index", 0)
 
         for (i in videoListUris.indices) {
             val uri = (videoListUris[i] as? Uri) ?: (videoListUris[i] as? String)?.toUri() ?: continue
@@ -127,7 +123,7 @@ object IntentUtils {
             }
 
             // Если dataUri совпадает с текущим элементом списка, берем позицию из extras
-            val pos = if (dataUri != null && uri == dataUri) extras.getInt("position", 0).toLong() else 0L
+            val pos = if (dataUri != null && uri == dataUri) getLongExtraCompat(extras, "position", 0L) else 0L
             if (dataUri != null && uri == dataUri) startIndex = i
 
             playlist.add(
@@ -142,7 +138,29 @@ object IntentUtils {
                 )
             )
         }
+        startIndex = startIndex.coerceIn(0, (playlist.size - 1).coerceAtLeast(0))
         return Pair(playlist, startIndex)
+    }
+
+
+    private fun parseHeaders(extras: Bundle): Map<String, String> {
+        val headersArray = getSmartStringArray(extras, "headers") ?: return emptyMap()
+        val result = mutableMapOf<String, String>()
+        for (i in 0 until headersArray.size - 1 step 2) {
+            val key = headersArray[i]
+            val value = headersArray[i + 1]
+            if (key.isNotBlank()) result[key] = value
+        }
+        return result
+    }
+
+    private fun getLongExtraCompat(bundle: Bundle, key: String, defaultValue: Long = 0L): Long {
+        return when (val value = bundle.get(key)) {
+            is Long -> value
+            is Int -> value.toLong()
+            is String -> value.toLongOrNull() ?: defaultValue
+            else -> defaultValue
+        }
     }
 
     /**
