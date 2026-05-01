@@ -266,11 +266,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     BridgeEvent.PositionTick(
                         sessionId = bridgeConfig.sessionId,
                         ts = now,
-                        uri = currentPlayer.currentMediaItem?.localConfiguration?.uri?.toString(),
-                        position = currentPlayer.currentPosition,
-                        duration = currentPlayer.duration,
-                        bufferedPosition = currentPlayer.bufferedPosition,
-                        bufferedPercentage = _bufferedPercentage.value
+                        uri = p.currentMediaItem?.localConfiguration?.uri?.toString(),
+                        position = p.currentPosition,
+                        duration = normalizeDuration(p.duration),
+                        bufferedPosition = p.bufferedPosition,
+                        bufferedPercentage = _bufferedPercentage.value,
+                        windowIndex = p.currentMediaItemIndex,
+                        title = p.currentMediaItem?.mediaMetadata?.title?.toString()
                     )
                 )
                 lastBridgeTickAt = now
@@ -304,7 +306,22 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 // После буферизации или старта обновляем инфо
                 player?.videoFormat?.let { updateVideoInfoBadge(it) }
             }
-            if (playbackState == Player.STATE_ENDED) _playbackEnded.value = true
+            if (playbackState == Player.STATE_ENDED) {
+                _playbackEnded.value = true
+                val p = player
+                bridgeDispatcher?.emit(
+                    BridgeEvent.PlaybackEnded(
+                        sessionId = bridgeConfig.sessionId,
+                        ts = System.currentTimeMillis(),
+                        uri = p?.currentMediaItem?.localConfiguration?.uri?.toString(),
+                        windowIndex = p?.currentMediaItemIndex ?: 0,
+                        playlistSize = p?.mediaItemCount ?: 0,
+                        title = p?.currentMediaItem?.mediaMetadata?.title?.toString(),
+                        position = p?.currentPosition,
+                        duration = p?.duration?.let { normalizeDuration(it) }
+                    )
+                )
+            }
             updateProgressUpdaterState()
             bridgeDispatcher?.emit(
                 BridgeEvent.PlaybackStateChanged(
@@ -340,13 +357,20 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         override fun onMediaItemTransition(mediaItem: Media3MediaItem?, reason: Int) {
             ioRetryCount = 0 // Сброс счетчика при смене видео
             handleMediaItemTransition(mediaItem)
+            val p = player
             bridgeDispatcher?.emit(
                 BridgeEvent.PlaylistItemChanged(
                     sessionId = bridgeConfig.sessionId,
                     ts = System.currentTimeMillis(),
                     uri = mediaItem?.localConfiguration?.uri?.toString(),
-                    windowIndex = player?.currentMediaItemIndex ?: 0,
-                    title = mediaItem?.mediaMetadata?.title?.toString()
+                    windowIndex = p?.currentMediaItemIndex ?: 0,
+                    playlistSize = p?.mediaItemCount ?: 0,
+                    title = mediaItem?.mediaMetadata?.title?.toString(),
+                    reason = bridgeTransitionReason(reason),
+                    position = p?.currentPosition,
+                    duration = p?.duration?.let { normalizeDuration(it) },
+                    hasPrevious = p?.hasPreviousMediaItem() == true,
+                    hasNext = p?.hasNextMediaItem() == true
                 )
             )
         }
@@ -900,9 +924,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun loadPlaylist(items: List<MediaItem>, startIndex: Int) {
+    fun loadPlaylist(items: List<MediaItem>, startIndex: Int, startPosMs: Long? = null) {
         _currentPlaylist.value = items
-        val startPos = items.getOrNull(startIndex)?.startPositionMs ?: 0L
+        val startPos = startPosMs ?: items.getOrNull(startIndex)?.startPositionMs ?: 0L
         playerManager.loadPlaylist(items, startIndex, startPos)
         viewModelScope.launch { repository.cleanupOldSettings() }
     }
@@ -1468,6 +1492,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearToast() {
         _toastMessage.value = null
+    }
+
+
+    private fun normalizeDuration(value: Long): Long? {
+        return if (value <= 0 || value == C.TIME_UNSET) null else value
+    }
+
+    private fun bridgeTransitionReason(reason: Int): String {
+        return when (reason) {
+            Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> "auto"
+            Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> "seek"
+            Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> "playlist_changed"
+            Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> "repeat"
+            else -> "unknown"
+        }
     }
 
     fun emitUserAction(action: String, payload: Map<String, String> = emptyMap()) {
