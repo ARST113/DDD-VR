@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
@@ -26,7 +27,12 @@ import top.rootu.dddplayer.bridge.BridgeConfig
 import top.rootu.dddplayer.bridge.BridgeDispatcher
 import top.rootu.dddplayer.bridge.BridgeMediaItem
 import top.rootu.dddplayer.bridge.BridgeEvent
+import top.rootu.dddplayer.bridge.BridgeMode
+import top.rootu.dddplayer.bridge.BridgeTransport
 import top.rootu.dddplayer.bridge.BroadcastTransport
+import top.rootu.dddplayer.bridge.CompositeTransport
+import top.rootu.dddplayer.bridge.LocalBridgeServer
+import top.rootu.dddplayer.bridge.LocalStoreTransport
 import top.rootu.dddplayer.utils.IntentUtils
 import top.rootu.dddplayer.viewmodel.PlayerViewModel
 
@@ -100,7 +106,11 @@ class PlayerActivity : AppCompatActivity() {
             if (ended) {
                 isCompleted = true
                 finishReason = "completion"
-                if (shouldReturnResult) {
+                if (bridgeConfig.mode == BridgeMode.LOCAL || bridgeConfig.mode == BridgeMode.BOTH) {
+            LocalBridgeServer.scheduleStopAfter(120_000L)
+        }
+
+        if (shouldReturnResult) {
                     finish() // Закрываем активити
                 }
             }
@@ -139,6 +149,21 @@ class PlayerActivity : AppCompatActivity() {
         checkPermissionsAndHandleIntent(intent)
     }
 
+
+    private fun createBridgeTransport(config: BridgeConfig): BridgeTransport {
+        return when (config.mode) {
+            BridgeMode.BROADCAST -> BroadcastTransport(this, config)
+            BridgeMode.LOCAL -> {
+                LocalBridgeServer.ensureStarted(port = config.localPort, token = config.localToken)
+                LocalStoreTransport(config)
+            }
+            BridgeMode.BOTH -> {
+                LocalBridgeServer.ensureStarted(port = config.localPort, token = config.localToken)
+                CompositeTransport(listOf(BroadcastTransport(this, config), LocalStoreTransport(config)))
+            }
+        }
+    }
+
     private fun checkPermissionsAndHandleIntent(intent: Intent) {
         val uri = intent.data
 
@@ -175,8 +200,11 @@ class PlayerActivity : AppCompatActivity() {
         shouldReturnResult = intent.getBooleanExtra("return_result", false)
         bridgeConfig = IntentUtils.parseBridgeConfig(intent)
         bridgeDispatcher = if (bridgeConfig.enabled) {
-            BridgeDispatcher(bridgeConfig, BroadcastTransport(this, bridgeConfig))
+            val transport = createBridgeTransport(bridgeConfig)
+            Log.d("DDDPlayerBridge", "Bridge enabled: mode=${bridgeConfig.mode}, session=${bridgeConfig.sessionId}, port=${bridgeConfig.localPort}")
+            BridgeDispatcher(bridgeConfig, transport)
         } else {
+            Log.d("DDDPlayerBridge", "Bridge disabled")
             null
         }
 
@@ -272,6 +300,10 @@ class PlayerActivity : AppCompatActivity() {
                 title = p?.currentMediaItem?.mediaMetadata?.title?.toString()
             )
         )
+
+        if (bridgeConfig.mode == BridgeMode.LOCAL || bridgeConfig.mode == BridgeMode.BOTH) {
+            LocalBridgeServer.scheduleStopAfter(120_000L)
+        }
 
         if (shouldReturnResult) {
             val resultIntent = Intent("top.rootu.dddplayer.intent.result.VIEW")

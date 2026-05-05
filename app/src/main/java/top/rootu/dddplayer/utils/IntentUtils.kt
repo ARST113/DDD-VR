@@ -11,10 +11,31 @@ import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import top.rootu.dddplayer.bridge.BridgeConfig
 import top.rootu.dddplayer.bridge.BridgeMode
+import top.rootu.dddplayer.bridge.BroadcastTransport
 import top.rootu.dddplayer.model.MediaItem
 import top.rootu.dddplayer.model.SubtitleItem
 
 object IntentUtils {
+
+    private fun parseFragmentParams(uri: Uri?): Map<String, String> {
+        val fragment = uri?.encodedFragment ?: return emptyMap()
+        if (fragment.isBlank()) return emptyMap()
+
+        return fragment.split("&")
+            .mapNotNull { pair ->
+                val idx = pair.indexOf("=")
+                if (idx <= 0) return@mapNotNull null
+                val key = Uri.decode(pair.substring(0, idx))
+                val value = Uri.decode(pair.substring(idx + 1))
+                if (key.isBlank()) null else key to value
+            }
+            .toMap()
+    }
+
+    private fun stripFragment(uri: Uri): Uri {
+        return uri.buildUpon().fragment(null).build()
+    }
+
 
     /**
      * Парсит Intent и возвращает список медиа-элементов и стартовую позицию.
@@ -42,27 +63,45 @@ object IntentUtils {
     }
 
     fun parseBridgeConfig(intent: Intent): BridgeConfig {
-        val mode = when (intent.getStringExtra("bridge_mode")?.lowercase()) {
+        val fragment = parseFragmentParams(intent.data)
+
+        val enabledFromFragment =
+            fragment.containsKey("ddd_mode") ||
+                fragment.containsKey("ddd_sid") ||
+                fragment.containsKey("ddd_port") ||
+                fragment.containsKey("ddd_token")
+
+        val modeString =
+            intent.getStringExtra("bridge_mode")
+                ?: fragment["ddd_mode"]
+                ?: "broadcast"
+
+        val mode = when (modeString.lowercase()) {
+            "local" -> BridgeMode.LOCAL
+            "both" -> BridgeMode.BOTH
             "broadcast" -> BridgeMode.BROADCAST
             else -> BridgeMode.BROADCAST
         }
 
         return BridgeConfig(
-            enabled = intent.getBooleanExtra("bridge_enabled", false),
-            sessionId = intent.getStringExtra("bridge_session_id"),
+            enabled = intent.getBooleanExtra("bridge_enabled", false) || enabledFromFragment,
+            sessionId = intent.getStringExtra("bridge_session_id") ?: fragment["ddd_sid"],
             mode = mode,
             emitPosition = intent.getBooleanExtra("bridge_emit_position", true),
             emitUserActions = intent.getBooleanExtra("bridge_emit_user_actions", true),
             positionIntervalMs = intent.getLongExtra("bridge_position_interval_ms", 1000L).coerceAtLeast(250L),
-            client = intent.getStringExtra("bridge_client") ?: "lampa",
-            eventAction = intent.getStringExtra("bridge_event_action") ?: "top.rootu.dddplayer.bridge.EVENT",
+            client = intent.getStringExtra("bridge_client") ?: fragment["ddd_client"] ?: "lampa",
+            eventAction = intent.getStringExtra("bridge_event_action") ?: BroadcastTransport.DEFAULT_ACTION_EVENT,
             receiverPackage = intent.getStringExtra("bridge_receiver_package"),
-            schemaVersion = intent.getIntExtra("bridge_schema_version", 1)
+            schemaVersion = intent.getIntExtra("bridge_schema_version", 1),
+            localPort = fragment["ddd_port"]?.toIntOrNull() ?: 39677,
+            localToken = intent.getStringExtra("bridge_local_token") ?: fragment["ddd_token"]
         )
     }
 
-    private fun parseSingleFile(context: Context, intent: Intent): Pair<List<MediaItem>, Int> {
-        val uri = intent.data ?: return Pair(emptyList(), 0)
+        private fun parseSingleFile(context: Context, intent: Intent): Pair<List<MediaItem>, Int> {
+        val rawUri = intent.data ?: return Pair(emptyList(), 0)
+        val uri = stripFragment(rawUri)
         val extras = intent.extras ?: Bundle.EMPTY
 
         // Пытаемся найти заголовок в Extras (некоторые приложения передают его)
@@ -128,7 +167,7 @@ object IntentUtils {
 
             playlist.add(
                 MediaItem(
-                    uri = uri,
+                    uri = stripFragment(uri),
                     title = title,
                     filename = filenames?.getOrNull(i),
                     posterUri = posters?.getOrNull(i)?.takeIf { it.isNotEmpty() }?.toUri(),

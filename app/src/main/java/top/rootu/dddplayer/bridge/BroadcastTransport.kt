@@ -2,6 +2,7 @@ package top.rootu.dddplayer.bridge
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.google.gson.Gson
 
 class BroadcastTransport(
@@ -28,7 +29,9 @@ class BroadcastTransport(
         intent.putExtra(EXTRA_CLIENT, config.client)
         intent.putExtra(EXTRA_SESSION_ID, event.sessionId)
         intent.putExtra(EXTRA_EVENT_TYPE, type)
-        intent.putExtra(EXTRA_EVENT_JSON, gson.toJson(envelope))
+        val json = gson.toJson(envelope)
+        Log.d("DDDPlayerBridge", json)
+        intent.putExtra(EXTRA_EVENT_JSON, json)
         context.sendBroadcast(intent)
     }
 
