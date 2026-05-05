@@ -27,7 +27,7 @@
     </androidx.media3.ui.AspectRatioFrameLayout>
 
     <!-- 2. OpenGL SurfaceView для 3D/VR/Анаглифа -->
-    <top.rootu.dddplayer.renderer.StereoGLSurfaceView
+    <top.rootu.dddvr.renderer.StereoGLSurfaceView
         android:id="@+id/gl_surface_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -67,7 +67,7 @@
     </LinearLayout>
 
     <!-- Одиночные часы в правом верхнем углу (с черным контуром) -->
-    <top.rootu.dddplayer.ui.widget.OutlineTextClock
+    <top.rootu.dddvr.ui.widget.OutlineTextClock
         android:id="@+id/standalone_clock"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

@@ -131,7 +131,7 @@ object LocalBridgeServer {
                 val query = parseQuery(uri.rawQuery)
 
                 when (path) {
-                    "/ping" -> writeJson(client, 200, "{\"ok\":true,\"service\":\"dddplayer-local-bridge\"}")
+                    "/ping" -> writeJson(client, 200, "{\"ok\":true,\"service\":\"dddvr-local-bridge\"}")
                     "/state" -> {
                         if (!authorized(query)) {
                             writeJson(client, 403, "{\"error\":\"forbidden\"}")
