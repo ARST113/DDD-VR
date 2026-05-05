@@ -6,7 +6,9 @@ import android.opengl.GLSurfaceView
 import android.view.Surface
 import top.rootu.dddvr.vr.camera.Eye
 import top.rootu.dddvr.vr.input.VrInputController
+import top.rootu.dddvr.vr.projection.FlatProjection
 import top.rootu.dddvr.vr.projection.ProjectionManager
+import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.stereo.StereoUvMapper
 import top.rootu.dddvr.vr.ui.VrUiLayer
 import javax.microedition.khronos.egl.EGLConfig
@@ -21,7 +23,7 @@ class VrSceneRenderer(
     val inputController = VrInputController()
 
     private lateinit var textureSource: VideoTextureSource
-    private val stereoUvMapper = StereoUvMapper()
+    val stereoUvMapper = StereoUvMapper()
     @Volatile private var frameAvailable = false
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -31,15 +33,20 @@ class VrSceneRenderer(
         surfaceTexture.setOnFrameAvailableListener(this)
         val surface = Surface(surfaceTexture)
         textureSource = VideoTextureSource(surfaceTexture, surface, textureId[0])
-        projectionManager = ProjectionManager(textureSource)
+        projectionManager = ProjectionManager(textureSource).apply {
+            register(ProjectionType.FLAT, FlatProjection())
+            setCurrentProjectionType(ProjectionType.FLAT)
+        }
         onSurfaceReady(surface)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        GLES20.glViewport(0, 0, width, height)
+        projectionManager.setAspectRatio(width, height)
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         if (frameAvailable) {
             textureSource.updateTexImage()
             frameAvailable = false
