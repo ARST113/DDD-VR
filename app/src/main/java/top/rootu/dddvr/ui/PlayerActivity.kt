@@ -201,10 +201,10 @@ class PlayerActivity : AppCompatActivity() {
         bridgeConfig = IntentUtils.parseBridgeConfig(intent)
         bridgeDispatcher = if (bridgeConfig.enabled) {
             val transport = createBridgeTransport(bridgeConfig)
-            Log.d("DDDPlayerBridge", "Bridge enabled: mode=${bridgeConfig.mode}, session=${bridgeConfig.sessionId}, port=${bridgeConfig.localPort}")
+            Log.d("DDDVRBridge", "Bridge enabled: mode=${bridgeConfig.mode}, session=${bridgeConfig.sessionId}, port=${bridgeConfig.localPort}")
             BridgeDispatcher(bridgeConfig, transport)
         } else {
-            Log.d("DDDPlayerBridge", "Bridge disabled")
+            Log.d("DDDVRBridge", "Bridge disabled")
             null
         }
 

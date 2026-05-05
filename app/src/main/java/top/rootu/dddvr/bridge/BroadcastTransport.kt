@@ -30,7 +30,7 @@ class BroadcastTransport(
         intent.putExtra(EXTRA_SESSION_ID, event.sessionId)
         intent.putExtra(EXTRA_EVENT_TYPE, type)
         val json = gson.toJson(envelope)
-        Log.d("DDDPlayerBridge", json)
+        Log.d("DDDVRBridge", json)
         intent.putExtra(EXTRA_EVENT_JSON, json)
         context.sendBroadcast(intent)
     }

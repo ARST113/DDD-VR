@@ -11,7 +11,7 @@ class CompositeTransport(
                 transport.send(event)
             } catch (e: Exception) {
                 Log.w(
-                    "DDDPlayerBridge",
+                    "DDDVRBridge",
                     "transport failed=${transport::class.simpleName}, event=${event::class.simpleName}",
                     e
                 )

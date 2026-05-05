@@ -16,7 +16,7 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 object LocalBridgeServer {
-    private const val TAG = "DDDPlayerLocalServer"
+    private const val TAG = "DDDVRLocalServer"
 
     private val gson = Gson()
     private val clientExecutor = Executors.newCachedThreadPool()
@@ -51,7 +51,7 @@ object LocalBridgeServer {
             running = true
 
             Thread { acceptLoop(socket) }.apply {
-                name = "DDDPlayerLocalBridgeServer"
+                name = "DDDVRLocalBridgeServer"
                 isDaemon = true
                 start()
             }

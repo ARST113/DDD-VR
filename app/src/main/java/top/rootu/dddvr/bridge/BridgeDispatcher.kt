@@ -11,7 +11,7 @@ class BridgeDispatcher(
         try {
             transport.send(event)
         } catch (e: Exception) {
-            Log.w("DDDPlayerBridge", "Failed to send bridge event: ${event::class.simpleName}", e)
+            Log.w("DDDVRBridge", "Failed to send bridge event: ${event::class.simpleName}", e)
         }
     }
 }

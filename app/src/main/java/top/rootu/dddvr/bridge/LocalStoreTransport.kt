@@ -16,6 +16,6 @@ class LocalStoreTransport(
             payload = event
         )
         LocalBridgeStore.put(envelope)
-        Log.d("DDDPlayerLocalBridge", "stored event=$type session=${event.sessionId}")
+        Log.d("DDDVRLocalBridge", "stored event=$type session=${event.sessionId}")
     }
 }
