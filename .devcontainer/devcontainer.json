@@ -1,0 +1,29 @@
+{
+  "name": "DDD VR Android",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "jdkDistro": "temurin"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "fwcd.kotlin",
+        "vscjava.vscode-java-pack",
+        "redhat.vscode-xml"
+      ]
+    }
+  },
+
+  "postCreateCommand": "bash scripts/bootstrap-android-sdk.sh",
+
+  "remoteEnv": {
+    "ANDROID_HOME": "${containerEnv:HOME}/android-sdk",
+    "ANDROID_SDK_ROOT": "${containerEnv:HOME}/android-sdk",
+    "JAVA_HOME": "/usr/local/sdkman/candidates/java/current"
+  }
+}
