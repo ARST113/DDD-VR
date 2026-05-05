@@ -1,5 +1,6 @@
 package top.rootu.dddvr
 
+<<<<<<< HEAD
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -59,3 +60,6 @@ class App : Application(), ImageLoaderFactory {
             .build()
     }
 }
+=======
+class App : top.rootu.dddvr.App()
+>>>>>>> origin/main
