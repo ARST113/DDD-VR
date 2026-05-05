@@ -23,7 +23,7 @@ data class UpdateInfo(
 class UpdateManager(private val context: Context) {
 
     private val client = OkHttpClient()
-    private val repoUrl = "https://api.github.com/repos/usmanec/dddplayer/releases"
+    private val repoUrl = "https://api.github.com/repos/usmanec/dddvr/releases"
 
     suspend fun checkForUpdates(currentVersionName: String?): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
