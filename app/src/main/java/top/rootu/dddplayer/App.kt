@@ -1,4 +1,4 @@
-package top.rootu.dddplayer
+package top.rootu.dddvr
 
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
@@ -6,8 +6,8 @@ import androidx.core.os.LocaleListCompat
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import okhttp3.OkHttpClient
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.utils.CrashHandler
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.utils.CrashHandler
 import java.util.concurrent.TimeUnit
 
 class App : Application(), ImageLoaderFactory {

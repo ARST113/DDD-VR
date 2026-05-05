@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui
+package top.rootu.dddvr.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -21,20 +21,20 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
-import top.rootu.dddplayer.BuildConfig
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.bridge.BridgeConfig
-import top.rootu.dddplayer.bridge.BridgeDispatcher
-import top.rootu.dddplayer.bridge.BridgeMediaItem
-import top.rootu.dddplayer.bridge.BridgeEvent
-import top.rootu.dddplayer.bridge.BridgeMode
-import top.rootu.dddplayer.bridge.BridgeTransport
-import top.rootu.dddplayer.bridge.BroadcastTransport
-import top.rootu.dddplayer.bridge.CompositeTransport
-import top.rootu.dddplayer.bridge.LocalBridgeServer
-import top.rootu.dddplayer.bridge.LocalStoreTransport
-import top.rootu.dddplayer.utils.IntentUtils
-import top.rootu.dddplayer.viewmodel.PlayerViewModel
+import top.rootu.dddvr.BuildConfig
+import top.rootu.dddvr.R
+import top.rootu.dddvr.bridge.BridgeConfig
+import top.rootu.dddvr.bridge.BridgeDispatcher
+import top.rootu.dddvr.bridge.BridgeMediaItem
+import top.rootu.dddvr.bridge.BridgeEvent
+import top.rootu.dddvr.bridge.BridgeMode
+import top.rootu.dddvr.bridge.BridgeTransport
+import top.rootu.dddvr.bridge.BroadcastTransport
+import top.rootu.dddvr.bridge.CompositeTransport
+import top.rootu.dddvr.bridge.LocalBridgeServer
+import top.rootu.dddvr.bridge.LocalStoreTransport
+import top.rootu.dddvr.utils.IntentUtils
+import top.rootu.dddvr.viewmodel.PlayerViewModel
 
 @UnstableApi
 class PlayerActivity : AppCompatActivity() {
@@ -237,7 +237,7 @@ class PlayerActivity : AppCompatActivity() {
                 val defaultUri = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 //                val defaultUri = "http://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
                 viewModel.loadPlaylist(
-                    listOf(top.rootu.dddplayer.model.MediaItem(defaultUri.toUri())),
+                    listOf(top.rootu.dddvr.model.MediaItem(defaultUri.toUri())),
                     0
                 )
                 viewModel.setBridgeDispatcher(bridgeDispatcher, bridgeConfig)
@@ -306,7 +306,7 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         if (shouldReturnResult) {
-            val resultIntent = Intent("top.rootu.dddplayer.intent.result.VIEW")
+            val resultIntent = Intent("top.rootu.dddvr.intent.result.VIEW")
 
             // Возвращаем URI текущего видео (полезно, если это был плейлист)
             resultIntent.data = viewModel.player?.currentMediaItem?.localConfiguration?.uri

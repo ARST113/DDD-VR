@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.widget
+package top.rootu.dddvr.ui.widget
 
 import android.content.Context
 import android.graphics.Canvas

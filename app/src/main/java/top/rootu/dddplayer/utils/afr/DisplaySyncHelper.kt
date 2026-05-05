@@ -1,9 +1,9 @@
-package top.rootu.dddplayer.utils.afr
+package top.rootu.dddvr.utils.afr
 
 import android.content.Context
 import android.os.Build
 import android.view.Window
-import top.rootu.dddplayer.utils.afr.DisplayHolder.Mode
+import top.rootu.dddvr.utils.afr.DisplayHolder.Mode
 
 class DisplaySyncHelper(context: Context?) : UhdHelperListener {
     private var mContext: Context? = context?.applicationContext

@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.viewmodel
+package top.rootu.dddvr.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -6,12 +6,12 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import top.rootu.dddplayer.BuildConfig
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.logic.UpdateInfo
-import top.rootu.dddplayer.logic.UpdateManager
-import top.rootu.dddplayer.utils.getString
+import top.rootu.dddvr.BuildConfig
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.logic.UpdateInfo
+import top.rootu.dddvr.logic.UpdateManager
+import top.rootu.dddvr.utils.getString
 
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
 

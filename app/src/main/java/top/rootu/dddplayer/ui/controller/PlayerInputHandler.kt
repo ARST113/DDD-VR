@@ -1,14 +1,14 @@
-package top.rootu.dddplayer.ui.controller
+package top.rootu.dddvr.ui.controller
 
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
 import androidx.core.view.isVisible
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.viewmodel.PlayerViewModel
-import top.rootu.dddplayer.viewmodel.SettingsViewModel
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.viewmodel.PlayerViewModel
+import top.rootu.dddvr.viewmodel.SettingsViewModel
 
 class PlayerInputHandler(
     private val viewModel: PlayerViewModel,

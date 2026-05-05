@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.player
+package top.rootu.dddvr.player
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -40,12 +40,12 @@ import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
 import androidx.media3.session.MediaSession
 import okhttp3.OkHttpClient
-import top.rootu.dddplayer.App.Companion.USER_AGENT
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.logic.AudioMixerLogic
-import top.rootu.dddplayer.logic.UnifiedMetadataReader
-import top.rootu.dddplayer.model.MediaItem
-import top.rootu.dddplayer.utils.MediaFormatHelper
+import top.rootu.dddvr.App.Companion.USER_AGENT
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.logic.AudioMixerLogic
+import top.rootu.dddvr.logic.UnifiedMetadataReader
+import top.rootu.dddvr.model.MediaItem
+import top.rootu.dddvr.utils.MediaFormatHelper
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap

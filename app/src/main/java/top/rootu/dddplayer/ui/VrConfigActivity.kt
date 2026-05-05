@@ -1,12 +1,12 @@
-package top.rootu.dddplayer.ui
+package top.rootu.dddvr.ui
 
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.utils.CardboardParamsParser
+import top.rootu.dddvr.R
+import top.rootu.dddvr.utils.CardboardParamsParser
 
 class VrConfigActivity : AppCompatActivity() {
 
@@ -32,7 +32,7 @@ class VrConfigActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveProfile(profile: top.rootu.dddplayer.utils.CardboardProfile) {
+    private fun saveProfile(profile: top.rootu.dddvr.utils.CardboardProfile) {
         val prefs = getSharedPreferences("global_prefs", MODE_PRIVATE)
         prefs.edit {
             putFloat("vr_k1", profile.k1)

@@ -1,11 +1,11 @@
-package top.rootu.dddplayer.ui.adapter
+package top.rootu.dddvr.ui.adapter
 
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckedTextView
 import androidx.recyclerview.widget.RecyclerView
-import top.rootu.dddplayer.R
+import top.rootu.dddvr.R
 
 class ChoiceAdapter(
     private val items: List<String>,

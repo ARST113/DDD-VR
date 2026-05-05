@@ -1,11 +1,11 @@
-package top.rootu.dddplayer.data
+package top.rootu.dddvr.data
 
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.media3.exoplayer.DefaultRenderersFactory
-import top.rootu.dddplayer.model.StereoOutputMode
-import top.rootu.dddplayer.renderer.StereoRenderer
+import top.rootu.dddvr.model.StereoOutputMode
+import top.rootu.dddvr.renderer.StereoRenderer
 
 class SettingsRepository private constructor(context: Context) {
 

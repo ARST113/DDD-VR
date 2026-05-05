@@ -1,8 +1,8 @@
-package top.rootu.dddplayer.utils.afr
+package top.rootu.dddvr.utils.afr
 
 import android.app.Activity
 import android.content.Context
-import top.rootu.dddplayer.utils.afr.DisplaySyncHelper.AutoFrameRateListener
+import top.rootu.dddvr.utils.afr.DisplaySyncHelper.AutoFrameRateListener
 
 interface AfrFormatItem {
     fun getWidth(): Int

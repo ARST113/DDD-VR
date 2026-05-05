@@ -1,7 +1,7 @@
 package top.rootu.dddvr.core.playback
 
 import android.view.Surface
-import top.rootu.dddplayer.player.PlayerManager
+import top.rootu.dddvr.player.PlayerManager
 
 class PlaybackSession(
     private val playerManager: PlayerManager
@@ -36,5 +36,5 @@ class PlaybackSession(
         playerManager.exoPlayer?.volume = if (muted) 0f else 1f
     }
 
-    fun release() = playerManager.release()
+    fun release() = playerManager.releasePlayer(isFinalRelease = true)
 }

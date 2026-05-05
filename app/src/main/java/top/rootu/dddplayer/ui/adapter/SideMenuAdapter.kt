@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.adapter
+package top.rootu.dddvr.ui.adapter
 
 import android.view.LayoutInflater
 import android.view.View
@@ -9,8 +9,8 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.model.MenuItem
+import top.rootu.dddvr.R
+import top.rootu.dddvr.model.MenuItem
 
 class SideMenuAdapter(
     var onItemClick: (MenuItem) -> Unit

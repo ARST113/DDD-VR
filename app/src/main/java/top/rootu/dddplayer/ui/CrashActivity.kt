@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui
+package top.rootu.dddvr.ui
 
 import android.app.Dialog
 import android.content.ClipData
@@ -20,7 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.rootu.dddplayer.R
+import top.rootu.dddvr.R
 import java.io.OutputStreamWriter
 import java.net.Socket
 import java.net.URL

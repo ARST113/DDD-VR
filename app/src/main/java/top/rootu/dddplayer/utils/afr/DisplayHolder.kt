@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.utils.afr
+package top.rootu.dddvr.utils.afr
 
 import android.os.Parcel
 import android.os.Parcelable

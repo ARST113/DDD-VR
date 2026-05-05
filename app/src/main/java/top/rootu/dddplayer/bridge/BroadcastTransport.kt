@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.bridge
+package top.rootu.dddvr.bridge
 
 import android.content.Context
 import android.content.Intent
@@ -36,7 +36,7 @@ class BroadcastTransport(
     }
 
     companion object {
-        const val DEFAULT_ACTION_EVENT = "top.rootu.dddplayer.bridge.EVENT"
+        const val DEFAULT_ACTION_EVENT = "top.rootu.dddvr.bridge.EVENT"
         const val EXTRA_SCHEMA = "schema"
         const val EXTRA_CLIENT = "client"
         const val EXTRA_SESSION_ID = "session_id"

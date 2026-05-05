@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.model
+package top.rootu.dddvr.model
 
 /**
  * Типы входного стерео-формата видеофайла.

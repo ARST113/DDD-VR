@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.logic
+package top.rootu.dddvr.logic
 
 import android.content.Context
 import android.util.Log
@@ -6,10 +6,10 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.utils.LocaleUtils
-import top.rootu.dddplayer.viewmodel.TrackOption
-import top.rootu.dddplayer.viewmodel.VideoQualityOption
+import top.rootu.dddvr.R
+import top.rootu.dddvr.utils.LocaleUtils
+import top.rootu.dddvr.viewmodel.TrackOption
+import top.rootu.dddvr.viewmodel.VideoQualityOption
 
 object TrackLogic {
 

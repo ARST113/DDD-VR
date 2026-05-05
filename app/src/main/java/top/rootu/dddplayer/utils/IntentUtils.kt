@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.content.ContentResolver
 import android.content.Context
@@ -9,11 +9,11 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
-import top.rootu.dddplayer.bridge.BridgeConfig
-import top.rootu.dddplayer.bridge.BridgeMode
-import top.rootu.dddplayer.bridge.BroadcastTransport
-import top.rootu.dddplayer.model.MediaItem
-import top.rootu.dddplayer.model.SubtitleItem
+import top.rootu.dddvr.bridge.BridgeConfig
+import top.rootu.dddvr.bridge.BridgeMode
+import top.rootu.dddvr.bridge.BroadcastTransport
+import top.rootu.dddvr.model.MediaItem
+import top.rootu.dddvr.model.SubtitleItem
 
 object IntentUtils {
 

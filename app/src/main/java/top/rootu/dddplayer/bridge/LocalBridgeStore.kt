@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.bridge
+package top.rootu.dddvr.bridge
 
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap

@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.viewmodel
+package top.rootu.dddvr.viewmodel
 
 import android.app.Application
 import android.content.Context
@@ -25,27 +25,27 @@ import androidx.media3.exoplayer.dash.manifest.DashManifest
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistTracker
 import kotlinx.coroutines.launch
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.bridge.BridgeConfig
-import top.rootu.dddplayer.bridge.BridgeDispatcher
-import top.rootu.dddplayer.bridge.BridgeEvent
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.data.VideoSettings
-import top.rootu.dddplayer.logic.AnaglyphLogic
-import top.rootu.dddplayer.logic.SettingsMutator
-import top.rootu.dddplayer.logic.TrackLogic
-import top.rootu.dddplayer.model.MediaItem
-import top.rootu.dddplayer.model.MenuItem
-import top.rootu.dddplayer.model.PlaybackSpeed
-import top.rootu.dddplayer.model.ResizeMode
-import top.rootu.dddplayer.model.StereoInputType
-import top.rootu.dddplayer.model.StereoOutputMode
-import top.rootu.dddplayer.player.PlayerManager
-import top.rootu.dddplayer.renderer.StereoRenderer
-import top.rootu.dddplayer.utils.MediaFormatHelper
-import top.rootu.dddplayer.utils.StereoTypeDetector
-import top.rootu.dddplayer.utils.afr.RuntimeFpsDetector
-import top.rootu.dddplayer.utils.getString
+import top.rootu.dddvr.R
+import top.rootu.dddvr.bridge.BridgeConfig
+import top.rootu.dddvr.bridge.BridgeDispatcher
+import top.rootu.dddvr.bridge.BridgeEvent
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.data.VideoSettings
+import top.rootu.dddvr.logic.AnaglyphLogic
+import top.rootu.dddvr.logic.SettingsMutator
+import top.rootu.dddvr.logic.TrackLogic
+import top.rootu.dddvr.model.MediaItem
+import top.rootu.dddvr.model.MenuItem
+import top.rootu.dddvr.model.PlaybackSpeed
+import top.rootu.dddvr.model.ResizeMode
+import top.rootu.dddvr.model.StereoInputType
+import top.rootu.dddvr.model.StereoOutputMode
+import top.rootu.dddvr.player.PlayerManager
+import top.rootu.dddvr.renderer.StereoRenderer
+import top.rootu.dddvr.utils.MediaFormatHelper
+import top.rootu.dddvr.utils.StereoTypeDetector
+import top.rootu.dddvr.utils.afr.RuntimeFpsDetector
+import top.rootu.dddvr.utils.getString
 import androidx.media3.common.MediaItem as Media3MediaItem
 
 // --- Enums & Data Classes ---
