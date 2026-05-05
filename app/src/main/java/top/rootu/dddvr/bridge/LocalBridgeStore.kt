@@ -9,19 +9,29 @@ object LocalBridgeStore {
 
     fun put(envelope: BridgeEnvelope) {
         val sid = envelope.sessionId ?: return
+
         states[sid] = envelope
-        val list = events.computeIfAbsent(sid) { Collections.synchronizedList(mutableListOf()) }
+
+        val list = getOrCreateEventList(sid)
+
         synchronized(list) {
             list.add(envelope)
-            while (list.size > 200) list.removeAt(0)
+            while (list.size > 200) {
+                list.removeAt(0)
+            }
         }
     }
 
-    fun getState(sessionId: String): BridgeEnvelope? = states[sessionId]
+    fun getState(sessionId: String): BridgeEnvelope? {
+        return states[sessionId]
+    }
 
     fun getEvents(sessionId: String): List<BridgeEnvelope> {
         val list = events[sessionId] ?: return emptyList()
-        return synchronized(list) { list.toList() }
+
+        return synchronized(list) {
+            list.toList()
+        }
     }
 
     fun clear(sessionId: String) {
@@ -32,5 +42,17 @@ object LocalBridgeStore {
     fun clearAll() {
         states.clear()
         events.clear()
+    }
+
+    private fun getOrCreateEventList(sessionId: String): MutableList<BridgeEnvelope> {
+        val existing = events[sessionId]
+        if (existing != null) {
+            return existing
+        }
+
+        val created = Collections.synchronizedList(mutableListOf<BridgeEnvelope>())
+        val raced = events.putIfAbsent(sessionId, created)
+
+        return raced ?: created
     }
 }
