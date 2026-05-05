@@ -1,10 +1,10 @@
-package top.rootu.dddplayer.data
+package top.rootu.dddvr.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import top.rootu.dddplayer.model.StereoInputType
-import top.rootu.dddplayer.model.StereoOutputMode
-import top.rootu.dddplayer.renderer.StereoRenderer
+import top.rootu.dddvr.model.StereoInputType
+import top.rootu.dddvr.model.StereoOutputMode
+import top.rootu.dddvr.renderer.StereoRenderer
 
 @Entity(tableName = "video_settings")
 data class VideoSettings(

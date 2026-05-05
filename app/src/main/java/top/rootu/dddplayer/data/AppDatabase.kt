@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.data
+package top.rootu.dddvr.data
 
 import android.content.Context
 import androidx.room.Dao

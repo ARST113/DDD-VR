@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.net.Uri
 import android.util.Base64

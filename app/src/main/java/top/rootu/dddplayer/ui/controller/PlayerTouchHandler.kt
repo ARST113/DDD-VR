@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.controller
+package top.rootu.dddvr.ui.controller
 
 import android.content.Context
 import android.view.GestureDetector

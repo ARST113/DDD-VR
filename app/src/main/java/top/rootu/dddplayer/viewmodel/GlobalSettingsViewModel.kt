@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.viewmodel
+package top.rootu.dddvr.viewmodel
 
 import android.app.Application
 import androidx.annotation.StringRes
@@ -6,9 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.media3.exoplayer.DefaultRenderersFactory
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.logic.AudioMixerLogic
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.logic.AudioMixerLogic
 
 /**
  * ViewModel для управления всеми глобальными настройками приложения.

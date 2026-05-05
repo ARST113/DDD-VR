@@ -24,7 +24,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
-        android:name="top.rootu.dddplayer.App"
+        android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -37,7 +37,7 @@
         android:theme="@style/AppTheme">
 
         <activity
-            android:name="top.rootu.dddvr.vr.activity.VrPlayerActivity"
+            android:name=".vr.activity.VrPlayerActivity"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
             android:logo="@mipmap/ic_launcher"

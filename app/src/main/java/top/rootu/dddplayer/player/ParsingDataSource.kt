@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.player
+package top.rootu.dddvr.player
 
 import android.net.Uri
 import android.util.Log
@@ -12,7 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import top.rootu.dddplayer.logic.UnifiedMetadataReader
+import top.rootu.dddvr.logic.UnifiedMetadataReader
 import java.io.IOException
 import java.io.PipedInputStream
 import java.io.PipedOutputStream

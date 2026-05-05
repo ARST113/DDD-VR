@@ -1,8 +1,8 @@
-package top.rootu.dddplayer.logic
+package top.rootu.dddvr.logic
 
 import android.util.Log
-import top.rootu.dddplayer.logic.UnifiedMetadataReader.TrackInfo
-import top.rootu.dddplayer.logic.UnifiedMetadataReader.TrackType
+import top.rootu.dddvr.logic.UnifiedMetadataReader.TrackInfo
+import top.rootu.dddvr.logic.UnifiedMetadataReader.TrackType
 import java.io.DataInputStream
 import java.io.InputStream
 

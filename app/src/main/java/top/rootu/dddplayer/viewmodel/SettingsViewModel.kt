@@ -1,9 +1,9 @@
-package top.rootu.dddplayer.viewmodel
+package top.rootu.dddvr.viewmodel
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import top.rootu.dddplayer.logic.SettingsMutator
+import top.rootu.dddvr.logic.SettingsMutator
 
 class SettingsViewModel : ViewModel() {
 

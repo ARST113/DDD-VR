@@ -1,10 +1,10 @@
-package top.rootu.dddplayer.viewmodel
+package top.rootu.dddvr.viewmodel
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.logic.AnaglyphLogic
-import top.rootu.dddplayer.renderer.StereoRenderer
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.logic.AnaglyphLogic
+import top.rootu.dddvr.renderer.StereoRenderer
 
 /**
  * Делегат для управления состоянием рендеринга (Анаглиф, VR, Матрицы).

@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.renderer
+package top.rootu.dddvr.renderer
 
 import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
@@ -6,8 +6,8 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.util.Log
 import android.view.Surface
-import top.rootu.dddplayer.model.StereoInputType
-import top.rootu.dddplayer.model.StereoOutputMode
+import top.rootu.dddvr.model.StereoInputType
+import top.rootu.dddvr.model.StereoOutputMode
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer

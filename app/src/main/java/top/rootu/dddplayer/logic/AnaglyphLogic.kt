@@ -1,9 +1,9 @@
-package top.rootu.dddplayer.logic
+package top.rootu.dddvr.logic
 
 import android.graphics.Color
-import top.rootu.dddplayer.renderer.StereoRenderer
-import top.rootu.dddplayer.utils.DuboisMath
-import top.rootu.dddplayer.viewmodel.GlassesGroup
+import top.rootu.dddvr.renderer.StereoRenderer
+import top.rootu.dddvr.utils.DuboisMath
+import top.rootu.dddvr.viewmodel.GlassesGroup
 
 object AnaglyphLogic {
 

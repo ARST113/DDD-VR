@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.model
+package top.rootu.dddvr.model
 
 import android.net.Uri
 import java.util.UUID

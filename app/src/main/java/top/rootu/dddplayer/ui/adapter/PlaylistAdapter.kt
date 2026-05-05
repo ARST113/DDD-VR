@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.adapter
+package top.rootu.dddvr.ui.adapter
 
 import android.graphics.Color
 import android.view.LayoutInflater
@@ -15,8 +15,8 @@ import androidx.recyclerview.widget.RecyclerView
 import coil.dispose
 import coil.load
 import coil.transform.RoundedCornersTransformation
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.model.MediaItem
+import top.rootu.dddvr.R
+import top.rootu.dddvr.model.MediaItem
 
 class PlaylistAdapter(
     private val onItemClick: (Int) -> Unit
