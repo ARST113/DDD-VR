@@ -1,5 +1,6 @@
 package top.rootu.dddvr.utils.afr
 
+import androidx.core.content.ContextCompat
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -200,7 +201,12 @@ class UhdHelper(private val mContext: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             mContext.registerReceiver(overlayStateChangeReceiver, IntentFilter(MODESWITCH_OVERLAY_STATE_CHANGED), Context.RECEIVER_EXPORTED)
         } else {
-            mContext.registerReceiver(overlayStateChangeReceiver, IntentFilter(MODESWITCH_OVERLAY_STATE_CHANGED))
+            ContextCompat.registerReceiver(
+                mContext,
+                overlayStateChangeReceiver,
+                IntentFilter(MODESWITCH_OVERLAY_STATE_CHANGED),
+                ContextCompat.RECEIVER_EXPORTED
+            )
         }
 
         mDisplayListener = object : DisplayManager.DisplayListener {
