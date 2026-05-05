@@ -4,14 +4,20 @@ set -eo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+echo "Project root: $PROJECT_ROOT"
+
+if command -v java >/dev/null 2>&1; then
+  JAVA_BIN="$(readlink -f "$(command -v java)")"
+  export JAVA_HOME="$(dirname "$(dirname "$JAVA_BIN")")"
+elif [ -x "/usr/lib/jvm/java-17-openjdk-amd64/bin/java" ]; then
   export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-elif [ -d "/usr/lib/jvm/msopenjdk-17-amd64" ]; then
-  export JAVA_HOME="/usr/lib/jvm/msopenjdk-17-amd64"
+elif [ -x "/usr/local/sdkman/candidates/java/current/bin/java" ]; then
+  export JAVA_HOME="/usr/local/sdkman/candidates/java/current"
 else
-  echo "Java 17 not found."
-  echo "Install Java 17 first, for example: sudo apt-get update && sudo apt-get install -y openjdk-17-jdk"
-  exit 1
+  echo "Java 17 not found. Installing openjdk-17-jdk..."
+  sudo apt-get update
+  sudo apt-get install -y openjdk-17-jdk
+  export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
 fi
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
@@ -25,12 +31,11 @@ echo "ANDROID_HOME=$ANDROID_HOME"
 mkdir -p "$ANDROID_HOME/cmdline-tools"
 
 if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required."
-  exit 1
+  sudo apt-get update
+  sudo apt-get install -y curl
 fi
 
 if ! command -v unzip >/dev/null 2>&1; then
-  echo "unzip is missing, trying to install it..."
   sudo apt-get update
   sudo apt-get install -y unzip
 fi
