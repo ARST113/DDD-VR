@@ -38,11 +38,11 @@ plugins {
 }
 
 android {
-    namespace = "top.rootu.dddplayer"
+    namespace = "top.rootu.dddvr"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "top.rootu.dddplayer"
+        applicationId = "top.rootu.dddvr"
         minSdk = 23
         targetSdk = 34
         versionCode = gitVersionCode
