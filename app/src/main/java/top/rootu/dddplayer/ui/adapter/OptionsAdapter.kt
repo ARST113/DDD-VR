@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.adapter
+package top.rootu.dddvr.ui.adapter
 
 import android.graphics.Typeface
 import android.view.LayoutInflater
@@ -8,7 +8,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import top.rootu.dddplayer.R
+import top.rootu.dddvr.R
 
 class OptionsAdapter : ListAdapter<OptionsAdapter.OptionItem, OptionsAdapter.ViewHolder>(OptionDiffCallback()) {
 

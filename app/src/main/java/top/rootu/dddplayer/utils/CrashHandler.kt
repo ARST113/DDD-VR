@@ -1,11 +1,11 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.app.Application
 import android.content.Intent
 import android.os.Build
 import android.os.Process
-import top.rootu.dddplayer.BuildConfig
-import top.rootu.dddplayer.ui.CrashActivity
+import top.rootu.dddvr.BuildConfig
+import top.rootu.dddvr.ui.CrashActivity
 import kotlin.system.exitProcess
 
 object CrashHandler {

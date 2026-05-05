@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.renderer
+package top.rootu.dddvr.renderer
 
 import android.content.Context
 import android.opengl.GLSurfaceView

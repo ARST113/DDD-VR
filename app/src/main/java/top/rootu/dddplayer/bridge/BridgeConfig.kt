@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.bridge
+package top.rootu.dddvr.bridge
 
 data class BridgeConfig(
     val enabled: Boolean = false,

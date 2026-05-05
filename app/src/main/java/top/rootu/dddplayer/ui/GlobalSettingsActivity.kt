@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui
+package top.rootu.dddvr.ui
 
 import android.app.Dialog
 import android.os.Bundle
@@ -21,15 +21,15 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.os.LocaleListCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import top.rootu.dddplayer.BuildConfig
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
-import top.rootu.dddplayer.logic.AudioMixerLogic
-import top.rootu.dddplayer.logic.UpdateInfo
-import top.rootu.dddplayer.ui.adapter.ChoiceAdapter
-import top.rootu.dddplayer.utils.LocaleUtils
-import top.rootu.dddplayer.viewmodel.GlobalSettingsViewModel
-import top.rootu.dddplayer.viewmodel.UpdateViewModel
+import top.rootu.dddvr.BuildConfig
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
+import top.rootu.dddvr.logic.AudioMixerLogic
+import top.rootu.dddvr.logic.UpdateInfo
+import top.rootu.dddvr.ui.adapter.ChoiceAdapter
+import top.rootu.dddvr.utils.LocaleUtils
+import top.rootu.dddvr.viewmodel.GlobalSettingsViewModel
+import top.rootu.dddvr.viewmodel.UpdateViewModel
 
 class GlobalSettingsActivity : AppCompatActivity() {
 

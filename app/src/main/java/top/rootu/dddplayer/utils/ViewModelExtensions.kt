@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.app.Application
 import androidx.annotation.StringRes

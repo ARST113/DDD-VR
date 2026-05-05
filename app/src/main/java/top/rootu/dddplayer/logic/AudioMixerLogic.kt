@@ -1,8 +1,8 @@
-package top.rootu.dddplayer.logic
+package top.rootu.dddvr.logic
 
 import androidx.media3.common.audio.ChannelMixingMatrix
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
 import kotlin.math.sqrt
 
 object AudioMixerLogic {

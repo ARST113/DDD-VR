@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.logic
+package top.rootu.dddvr.logic
 
 import android.content.Context
 import android.content.Intent

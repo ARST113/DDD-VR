@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.ui.controller
+package top.rootu.dddvr.ui.controller
 
 import android.app.Dialog
 import android.graphics.Color
@@ -26,16 +26,16 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.model.MediaItem
-import top.rootu.dddplayer.model.ResizeMode
-import top.rootu.dddplayer.model.StereoInputType
-import top.rootu.dddplayer.model.StereoOutputMode
-import top.rootu.dddplayer.renderer.StereoGLSurfaceView
-import top.rootu.dddplayer.ui.adapter.OptionsAdapter
-import top.rootu.dddplayer.ui.adapter.PlaylistAdapter
-import top.rootu.dddplayer.ui.widget.OutlineTextClock
-import top.rootu.dddplayer.viewmodel.SettingType
+import top.rootu.dddvr.R
+import top.rootu.dddvr.model.MediaItem
+import top.rootu.dddvr.model.ResizeMode
+import top.rootu.dddvr.model.StereoInputType
+import top.rootu.dddvr.model.StereoOutputMode
+import top.rootu.dddvr.renderer.StereoGLSurfaceView
+import top.rootu.dddvr.ui.adapter.OptionsAdapter
+import top.rootu.dddvr.ui.adapter.PlaylistAdapter
+import top.rootu.dddvr.ui.widget.OutlineTextClock
+import top.rootu.dddvr.viewmodel.SettingType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

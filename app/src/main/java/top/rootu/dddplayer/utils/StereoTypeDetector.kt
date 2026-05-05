@@ -1,9 +1,9 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.common.Format
-import top.rootu.dddplayer.model.StereoInputType
+import top.rootu.dddvr.model.StereoInputType
 import java.util.Locale
 import java.util.regex.Pattern
 

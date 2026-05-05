@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.renderer
+package top.rootu.dddvr.renderer
 
 object ShaderSource {
     const val VERTEX_SHADER = """

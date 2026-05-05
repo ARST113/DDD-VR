@@ -1,4 +1,4 @@
-package top.rootu.dddplayer.utils.afr
+package top.rootu.dddvr.utils.afr
 
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
@@ -14,7 +14,7 @@ import android.util.Log
 import android.view.Display
 import android.view.Window
 import android.view.WindowManager
-import top.rootu.dddplayer.utils.afr.DisplayHolder.Mode
+import top.rootu.dddvr.utils.afr.DisplayHolder.Mode
 import java.lang.reflect.Field
 import java.util.concurrent.atomic.AtomicBoolean
 

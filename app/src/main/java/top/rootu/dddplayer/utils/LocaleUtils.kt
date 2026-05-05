@@ -1,8 +1,8 @@
-package top.rootu.dddplayer.utils
+package top.rootu.dddvr.utils
 
 import android.content.Context
-import top.rootu.dddplayer.R
-import top.rootu.dddplayer.data.SettingsRepository
+import top.rootu.dddvr.R
+import top.rootu.dddvr.data.SettingsRepository
 import java.util.Locale
 
 object LocaleUtils {
