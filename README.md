@@ -78,6 +78,10 @@ startActivity(intent)
 | `position` | Int/Long | Start position in milliseconds. |
 | `headers` | String[] | HTTP headers as array: `["Key1", "Val1", "Key2", "Val2"]`. |
 | `return_result`| Boolean | If true, returns playback position to calling app on finish. |
+| `vr_projection` | String | VR projection: `vr180`, `vr360`, `curved`, `flat_vr_screen`. |
+| `stereo_layout` | String | Stereo layout: `mono`, `sbs`, `ou`. |
+| `stereo_packing` | String | Stereo packing: `full`, `half`. |
+| `swap_eyes` | Boolean | Swaps left and right eye sampling in VR renderer. |
 
 #### Subtitles (Single Video)
 To add external subtitles to a single video, use the following extras:
