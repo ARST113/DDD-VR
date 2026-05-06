@@ -39,6 +39,10 @@ class ProjectionManager(
         projectionList.values.forEach { it.updateAspectRatio(width, height) }
     }
 
+    fun setHeadMatrix(matrix: FloatArray) {
+        projectionList.values.forEach { it.setHeadMatrix(matrix) }
+    }
+
     fun renderEye(eye: Eye, stereoMapper: StereoUvMapper) {
         val current = projectionList[currentProjectionType]
         when {
