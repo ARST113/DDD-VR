@@ -5,12 +5,10 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.view.Surface
 import top.rootu.dddvr.vr.camera.Eye
-import top.rootu.dddvr.vr.input.VrInputController
 import top.rootu.dddvr.vr.projection.FlatProjection
 import top.rootu.dddvr.vr.projection.ProjectionManager
 import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.stereo.StereoUvMapper
-import top.rootu.dddvr.vr.ui.VrUiLayer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
@@ -19,9 +17,6 @@ class VrSceneRenderer(
 ) : GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
     lateinit var projectionManager: ProjectionManager
         private set
-    val uiLayer = VrUiLayer()
-    val inputController = VrInputController()
-
     private lateinit var textureSource: VideoTextureSource
     val stereoUvMapper = StereoUvMapper()
     @Volatile private var frameAvailable = false
@@ -53,8 +48,6 @@ class VrSceneRenderer(
         }
         projectionManager.renderEye(Eye.LEFT, stereoUvMapper)
         projectionManager.renderEye(Eye.RIGHT, stereoUvMapper)
-        uiLayer.update()
-        inputController.update()
     }
 
     override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
