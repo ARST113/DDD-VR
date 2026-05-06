@@ -166,15 +166,31 @@ This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
 See the [LICENSE](LICENSE) file for details.
 ## OpenXR experimental mode
 
-A separate immersive activity is available for OpenXR bring-up without replacing the current VR fallback flow.
+Launch explicit OpenXR activity:
 
 ```bash
 adb shell am start \
   -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity \
   -a android.intent.action.VIEW \
-  -d "https://example.com/video.mp4" \
-  --es stereo_mode sbs \
-  --es vr_projection flat_vr_screen
+  -d "https://example.com/video.mp4"
 ```
 
-Current scope: immersive shell callback path + ExoPlayer surface bridge contract.
+MONO flat cinema:
+```bash
+adb shell am start -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity -a android.intent.action.VIEW -d "https://example.com/video.mp4" --es stereo_layout mono --es vr_projection flat_vr_screen
+```
+
+SBS flat cinema:
+```bash
+adb shell am start -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity -a android.intent.action.VIEW -d "https://example.com/video.mp4" --es stereo_layout sbs --es vr_projection flat_vr_screen
+```
+
+OU flat cinema:
+```bash
+adb shell am start -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity -a android.intent.action.VIEW -d "https://example.com/video.mp4" --es stereo_layout ou --es vr_projection flat_vr_screen
+```
+
+Swap eyes:
+```bash
+adb shell am start -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity -a android.intent.action.VIEW -d "https://example.com/video.mp4" --es stereo_layout sbs --ez swap_eyes true
+```
