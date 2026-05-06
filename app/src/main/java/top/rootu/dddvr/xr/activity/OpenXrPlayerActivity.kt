@@ -20,6 +20,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     private lateinit var playbackSession: PlaybackSession
     private lateinit var bridge: OpenXrBridge
     private var activeSurface: Surface? = null
+    private var initialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,12 +28,19 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val request = VrIntentParser.parse(intent) ?: run {
+            Log.e("DDDVR/OpenXR", "Invalid intent for OpenXrPlayerActivity")
             finish()
             return
         }
 
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
+
+        playerManager.loadPlaylist(
+            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
+            0,
+            request.startPositionMs
+        )
 
         val config = OpenXrPlaybackConfig.from(request)
         OpenXrDebugOverlay.logStartup(config)
@@ -44,31 +52,28 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
                 finish()
                 return
             }
-
-        playerManager.loadPlaylist(
-            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
-            0,
-            request.startPositionMs
-        )
+        initialized = true
     }
 
     override fun onResume() {
         super.onResume()
-        runCatching { bridge.onResume() }
+        if (initialized) runCatching { bridge.onResume() }
     }
 
     override fun onPause() {
-        runCatching { bridge.onPause() }
+        if (initialized) runCatching { bridge.onPause() }
         super.onPause()
     }
 
     override fun onDestroy() {
-        activeSurface?.let {
-            playbackSession.clearSurface(it)
-            it.release()
+        if (initialized) {
+            activeSurface?.let {
+                playbackSession.clearSurface(it)
+                it.release()
+            }
+            runCatching { bridge.destroy() }
+            playbackSession.release()
         }
-        runCatching { bridge.destroy() }
-        playbackSession.release()
         super.onDestroy()
     }
 
@@ -79,19 +84,8 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
-    override fun onPlayPause() {
-        if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play()
-    }
-
-    override fun onSeekBy(deltaMs: Long) {
-        playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs)
-    }
-
-    override fun onRecenter() {
-        OpenXrDebugOverlay.logSessionState("recenter_request")
-    }
-
-    override fun onExit() {
-        finish()
-    }
+    override fun onPlayPause() { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() }
+    override fun onSeekBy(deltaMs: Long) { playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
+    override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
+    override fun onExit() { finish() }
 }
