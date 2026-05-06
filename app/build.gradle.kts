@@ -123,6 +123,7 @@ dependencies {
     debugImplementation(libs.leakcanary.android)
 
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.13")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
