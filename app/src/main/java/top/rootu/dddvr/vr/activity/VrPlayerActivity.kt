@@ -59,7 +59,11 @@ class VrPlayerActivity : AppCompatActivity() {
             setContentView(fallback)
             return
         }
-        val initialProjection = mapProjectionMode(request.vrConfig.projectionMode, request.projectionType)
+        val initialProjection = mapProjectionMode(
+            mode = request.vrConfig.projectionMode,
+            fallback = request.projectionType,
+            hasVrProjectionExtra = request.hasVrProjectionExtra
+        )
 
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
@@ -189,11 +193,17 @@ class VrPlayerActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    internal fun mapProjectionMode(mode: ProjectionMode, fallback: ProjectionType): ProjectionType = when (mode) {
-        ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
-        ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
-        ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
-        ProjectionMode.VR_FLAT_SCREEN -> ProjectionType.FLAT
+    internal fun mapProjectionMode(
+        mode: ProjectionMode,
+        fallback: ProjectionType,
+        hasVrProjectionExtra: Boolean
+    ): ProjectionType = when {
+        !hasVrProjectionExtra -> fallback
+        mode == ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
+        mode == ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
+        mode == ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
+        mode == ProjectionMode.VR_FLAT_SCREEN -> ProjectionType.FLAT
+        else -> fallback
     }
 
     private fun applyImmersiveMode() {
