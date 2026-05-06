@@ -8,7 +8,8 @@ class ProjectionManager(
     private val videoTextureSource: VideoTextureSource
 ) {
     private val projectionList = mutableMapOf<ProjectionType, Projection>()
-    private var currentProjectionType: ProjectionType = ProjectionType.FLAT
+    var currentProjectionType: ProjectionType = ProjectionType.FLAT
+        private set
 
     fun register(type: ProjectionType, projection: Projection) {
         projectionList[type] = projection
