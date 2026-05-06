@@ -384,6 +384,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
         </provider>
+    
+        <activity
+            android:name=".xr.activity.OpenXrPlayerActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation" />
+
     </application>
 
 </manifest>

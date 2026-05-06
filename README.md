@@ -164,3 +164,17 @@ We welcome contributions from the community! Don't be shy to improve the code, f
 This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
 
 See the [LICENSE](LICENSE) file for details.
+## OpenXR experimental mode
+
+A separate immersive activity is available for OpenXR bring-up without replacing the current VR fallback flow.
+
+```bash
+adb shell am start \
+  -n top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity \
+  -a android.intent.action.VIEW \
+  -d "https://example.com/video.mp4" \
+  --es stereo_mode sbs \
+  --es vr_projection flat_vr_screen
+```
+
+Current scope: immersive shell callback path + ExoPlayer surface bridge contract.
