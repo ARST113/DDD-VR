@@ -11,22 +11,16 @@
     android:background="@color/black"
     tools:context=".ui.PlayerFragment">
 
-    <!-- 1. Контейнер для сохранения пропорций (для 2D/HDR) -->
+    <!-- Legacy flat SurfaceView path removed: keep container for compatibility with existing resize APIs. -->
     <androidx.media3.ui.AspectRatioFrameLayout
         android:id="@+id/aspect_ratio_frame"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center"
-        app:resize_mode="fit">
+        app:resize_mode="fit"
+        android:visibility="gone"/>
 
-        <SurfaceView
-            android:id="@+id/surface_view_standard"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-    </androidx.media3.ui.AspectRatioFrameLayout>
-
-    <!-- 2. OpenGL SurfaceView для 3D/VR/Анаглифа -->
+    <!-- OpenGL SurfaceView: single active video path. -->
     <top.rootu.dddvr.renderer.StereoGLSurfaceView
         android:id="@+id/gl_surface_view"
         android:layout_width="match_parent"
