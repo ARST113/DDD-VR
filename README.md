@@ -12,7 +12,7 @@
   </p>
 
   <p>
-    <b>Advanced 3D & HDR Video Player for Android TV and Mobile</b>
+    <b>Pure VR Video Player for Android</b>
     <br>
     <i>Supports Android 6.0 (API 23) and above.</i>
   </p>
@@ -20,9 +20,9 @@
 
 ---
 
-**DDD Video Player** is an advanced video player for Android (TV and Mobile) that allows you to watch not only standard 2D videos but also stereoscopic video pairs, creating an immersive 3D effect.
+**DDD Video Player** is being refactored into a pure VR-focused video player for Android. The playback pipeline is centered on GL/VR rendering instead of a legacy flat 2D player path.
 
-To experience the 3D effect, you will need **anaglyph glasses** (e.g., Red-Cyan) or **Cardboard VR-compatible equipment**.
+Use a **Cardboard VR-compatible headset** for immersive playback.
 
 ### Key Features
 
@@ -78,6 +78,10 @@ startActivity(intent)
 | `position` | Int/Long | Start position in milliseconds. |
 | `headers` | String[] | HTTP headers as array: `["Key1", "Val1", "Key2", "Val2"]`. |
 | `return_result`| Boolean | If true, returns playback position to calling app on finish. |
+| `vr_projection` | String | VR projection: `vr180`, `vr360`, `curved`, `flat_vr_screen`. |
+| `stereo_layout` | String | Stereo layout: `mono`, `sbs`, `ou`. |
+| `stereo_packing` | String | Stereo packing: `full`, `half`. |
+| `swap_eyes` | Boolean | Swaps left and right eye sampling in VR renderer. |
 
 #### Subtitles (Single Video)
 To add external subtitles to a single video, use the following extras:

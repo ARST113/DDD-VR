@@ -22,6 +22,8 @@ import top.rootu.dddvr.player.PlayerManager
 import top.rootu.dddvr.vr.input.VrControllerInputMapper
 import top.rootu.dddvr.vr.input.VrInputController
 import top.rootu.dddvr.vr.input.VrKeyAction
+import top.rootu.dddvr.vr.model.ProjectionMode
+import top.rootu.dddvr.vr.model.StereoLayout
 import top.rootu.dddvr.vr.player.VrPlayerController
 import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.renderer.VrGLSurfaceView
@@ -85,8 +87,22 @@ class VrPlayerActivity : AppCompatActivity() {
             uiLayer.setBlockingError("Invalid intent")
             return
         }
-        controller.setStereoMode(request.stereoInputMode)
-        controller.setProjection(request.projectionType)
+        val config = request.vrConfig
+        val stereoMode = when (config.stereoLayout) {
+            StereoLayout.SBS -> StereoInputMode.SBS
+            StereoLayout.OU -> StereoInputMode.OU
+            StereoLayout.MONO -> request.stereoInputMode
+        }
+        val projection = when (config.projectionMode) {
+            ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
+            ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
+            ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
+            ProjectionMode.VR_FLAT_SCREEN -> request.projectionType
+        }
+
+        controller.setStereoMode(stereoMode)
+        controller.setProjection(projection)
+        controller.swapEyes(config.swapEyes)
         playerManager.loadPlaylist(listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)), 0, request.startPositionMs)
         inputController.enable()
         uiLayer.show()
