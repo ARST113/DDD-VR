@@ -2,6 +2,7 @@ package top.rootu.dddvr.vr.activity
 
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 
 object VrIntentParser {
@@ -16,6 +17,7 @@ object VrIntentParser {
             else -> StereoInputMode.MONO
         }
         val startPositionMs = intent.getLongExtra(EXTRA_START_POSITION_MS, 0L).coerceAtLeast(0L)
+        Log.i("DDDVR/Intent", "uri=$uri stereo=$mode startMs=$startPositionMs type=${intent.type}")
         return VrPlaybackRequest(
             uri = uri,
             title = intent.getStringExtra(Intent.EXTRA_TITLE),
