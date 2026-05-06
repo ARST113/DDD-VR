@@ -12,6 +12,12 @@ abstract class Projection(
     var maxZoomIn: Float = 1f
     var maxZoomOut: Float = 30f
     var zoomStep: Float = 0.25f
+    protected var headPoseMatrix: FloatArray = floatArrayOf(
+        1f, 0f, 0f, 0f,
+        0f, 1f, 0f, 0f,
+        0f, 0f, 1f, 0f,
+        0f, 0f, 0f, 1f
+    )
 
     open fun setVisibility(visible: Boolean) {
         isVisible = visible
@@ -23,6 +29,10 @@ abstract class Projection(
 
     open fun zoomOut() {
         if (distance < maxZoomOut) distance += zoomStep
+    }
+
+    open fun setHeadMatrix(matrix: FloatArray) {
+        headPoseMatrix = matrix.copyOf()
     }
 
     abstract fun updateAspectRatio(width: Int, height: Int)

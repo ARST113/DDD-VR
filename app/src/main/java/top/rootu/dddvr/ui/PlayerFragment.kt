@@ -119,6 +119,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
 
     // Храним ссылку на GL Surface
     private var glSurface: Surface? = null
+    private var pendingSurfaceBindPlayer: Player? = null
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -246,7 +247,13 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
         // Pure VR path: always render through GL surface.
         ui.setSurfaceMode(true)
         ui.glSurfaceView.onResume()
-        glSurface?.let(player::setVideoSurface)
+        val surface = glSurface
+        if (surface != null) {
+            player.setVideoSurface(surface)
+            pendingSurfaceBindPlayer = null
+        } else {
+            pendingSurfaceBindPlayer = player
+        }
     }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
@@ -1343,9 +1350,11 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
 
     override fun onSurfaceReady(surface: Surface) {
         this.glSurface = surface
-        viewModel.player?.let { player ->
-            if (viewModel.inputType.value != StereoInputType.NONE) {
-                activity?.runOnUiThread { player.setVideoSurface(surface) }
+        val targetPlayer = pendingSurfaceBindPlayer ?: viewModel.player
+        targetPlayer?.let { player ->
+            activity?.runOnUiThread {
+                player.setVideoSurface(surface)
+                pendingSurfaceBindPlayer = null
             }
         }
     }
@@ -1362,9 +1371,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
         // Проверяем, нужно ли перезапустить плеер из-за смены настроек
         viewModel.checkSettingsAndRestart()
         viewModel.player?.playWhenReady = true
-        if (viewModel.inputType.value != StereoInputType.NONE) {
-            ui.glSurfaceView.onResume()
-        }
+        ui.glSurfaceView.onResume()
     }
 
     override fun onPause() {
@@ -1387,6 +1394,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
         stereoRenderer?.release()
         stereoRenderer = null
         glSurface = null
+        pendingSurfaceBindPlayer = null
 
         // Восстанавливаем оригинальный режим ТВ при выходе
         activity?.let {
