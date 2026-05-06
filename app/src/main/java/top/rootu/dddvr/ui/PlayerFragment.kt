@@ -243,16 +243,10 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
     }
 
     private fun attachSurfaceToPlayer(player: Player) {
-        // Проверяем текущий режим, чтобы привязать нужную поверхность
-        if (viewModel.inputType.value != StereoInputType.NONE) {
-            // 3D режим -> GL Surface
-            if (glSurface != null) {
-                player.setVideoSurface(glSurface)
-            }
-        } else {
-            // 2D режим -> Standard SurfaceView
-            player.setVideoSurfaceView(ui.standardSurfaceView)
-        }
+        // Pure VR path: always render through GL surface.
+        ui.setSurfaceMode(true)
+        ui.glSurfaceView.onResume()
+        glSurface?.let(player::setVideoSurface)
     }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
@@ -1014,19 +1008,13 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
             ui.seekBar.secondaryProgress = bufferedPos.toInt()
         }
 
-        // Переключение поверхностей (HDR Fix)
+        // Pure VR surface routing: input type changes only update stereo mapping/icon state.
         viewModel.inputType.observe(viewLifecycleOwner) { type ->
-            val isStereo = type != StereoInputType.NONE
-            ui.setSurfaceMode(isStereo)
+            ui.setSurfaceMode(true)
             viewModel.player?.let { player ->
-                if (isStereo) {
-                    ui.glSurfaceView.onResume()
-                    stereoRenderer?.setInputType(type)
-                    if (glSurface != null) player.setVideoSurface(glSurface)
-                } else {
-                    ui.glSurfaceView.onPause()
-                    player.setVideoSurfaceView(ui.standardSurfaceView)
-                }
+                ui.glSurfaceView.onResume()
+                stereoRenderer?.setInputType(type)
+                glSurface?.let(player::setVideoSurface)
             }
             ui.updateStereoLayout(viewModel.outputMode.value, viewModel.screenSeparation.value ?: 0f)
             ui.updateInputModeIcon(type, viewModel.swapEyes.value ?: false)

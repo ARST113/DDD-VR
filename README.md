@@ -12,7 +12,7 @@
   </p>
 
   <p>
-    <b>Advanced 3D & HDR Video Player for Android TV and Mobile</b>
+    <b>Pure VR Video Player for Android</b>
     <br>
     <i>Supports Android 6.0 (API 23) and above.</i>
   </p>
@@ -20,9 +20,9 @@
 
 ---
 
-**DDD Video Player** is an advanced video player for Android (TV and Mobile) that allows you to watch not only standard 2D videos but also stereoscopic video pairs, creating an immersive 3D effect.
+**DDD Video Player** is being refactored into a pure VR-focused video player for Android. The playback pipeline is centered on GL/VR rendering instead of a legacy flat 2D player path.
 
-To experience the 3D effect, you will need **anaglyph glasses** (e.g., Red-Cyan) or **Cardboard VR-compatible equipment**.
+Use a **Cardboard VR-compatible headset** for immersive playback.
 
 ### Key Features
 
