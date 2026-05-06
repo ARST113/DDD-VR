@@ -15,4 +15,9 @@ add_library(dddvr_openxr SHARED
 
 target_compile_features(dddvr_openxr PRIVATE cxx_std_17)
 
-target_link_libraries(dddvr_openxr android log EGL GLESv3)
+find_library(OPENXR_LOADER openxr_loader)
+if(OPENXR_LOADER)
+  target_link_libraries(dddvr_openxr android log EGL GLESv3 ${OPENXR_LOADER})
+else()
+  target_link_libraries(dddvr_openxr android log EGL GLESv3)
+endif()

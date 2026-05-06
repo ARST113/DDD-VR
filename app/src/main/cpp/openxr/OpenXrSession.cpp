@@ -2,6 +2,8 @@
 #include "../util/XrLog.h"
 #if HAS_OPENXR
 #include <cstring>
+#include <openxr/openxr_platform.h>
+#include <EGL/egl.h>
 #endif
 
 bool OpenXrSession::initialize() {
@@ -10,12 +12,9 @@ bool OpenXrSession::initialize() {
     std::strcpy(ci.applicationInfo.applicationName, "DDD-VR");
     ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
     if (xrCreateInstance(&ci, &instance_) != XR_SUCCESS) { lastError_ = "xrCreateInstance failed"; return false; }
-    XR_LOGI("DDDVR/OpenXRSession", "xrCreateInstance success");
-
     XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
     sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     if (xrGetSystem(instance_, &sgi, &systemId_) != XR_SUCCESS) { lastError_ = "xrGetSystem failed"; return false; }
-    XR_LOGI("DDDVR/OpenXRSession", "xrGetSystem success");
     runtimeAvailable_ = true;
     return true;
 #else
@@ -23,9 +22,16 @@ bool OpenXrSession::initialize() {
     return false;
 #endif
 }
+
 bool OpenXrSession::createSession(){
 #if HAS_OPENXR
-    XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO}; sci.systemId = systemId_;
+    XrGraphicsBindingOpenGLESAndroidKHR glBinding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
+    glBinding.display = eglGetCurrentDisplay();
+    glBinding.config = nullptr;
+    glBinding.context = eglGetCurrentContext();
+    XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO};
+    sci.next = &glBinding;
+    sci.systemId = systemId_;
     if (xrCreateSession(instance_, &sci, &session_) != XR_SUCCESS) { lastError_="xrCreateSession failed"; return false; }
     XR_LOGI("DDDVR/OpenXRSession","xrCreateSession success");
     return true;
@@ -33,6 +39,7 @@ bool OpenXrSession::createSession(){
     return false;
 #endif
 }
+
 bool OpenXrSession::createReferenceSpace(){
 #if HAS_OPENXR
     XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType=XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w=1.f;
@@ -42,6 +49,7 @@ bool OpenXrSession::createReferenceSpace(){
     return false;
 #endif
 }
+
 bool OpenXrSession::begin(){
 #if HAS_OPENXR
     XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
