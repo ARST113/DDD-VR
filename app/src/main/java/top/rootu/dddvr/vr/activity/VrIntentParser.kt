@@ -56,6 +56,7 @@ object VrIntentParser {
             "half" -> StereoPacking.HALF
             else -> StereoPacking.FULL
         }
+        val hasVrProjectionExtra = intent.hasExtra(EXTRA_VR_PROJECTION)
         val projectionMode = when (intent.getStringExtra(EXTRA_VR_PROJECTION)?.lowercase()) {
             "vr180" -> ProjectionMode.VR180
             "vr360" -> ProjectionMode.VR360
@@ -77,7 +78,8 @@ object VrIntentParser {
                 stereoPacking = packing,
                 swapEyes = swapEyes
             ),
-            hasStereoLayoutExtra = hasStereoLayoutExtra
+            hasStereoLayoutExtra = hasStereoLayoutExtra,
+            hasVrProjectionExtra = hasVrProjectionExtra
         )
     }
 }
