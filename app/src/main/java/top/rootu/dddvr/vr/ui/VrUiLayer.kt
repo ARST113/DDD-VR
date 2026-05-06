@@ -1,7 +1,30 @@
 package top.rootu.dddvr.vr.ui
 
-class VrUiLayer {
-    fun show() = Unit
-    fun hide() = Unit
-    fun update() = Unit
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.core.view.isVisible
+import top.rootu.dddvr.vr.player.VrPlaybackState
+
+class VrUiLayer(
+    private val root: FrameLayout,
+    val controlsOverlay: VrControlsOverlay,
+    private val loading: ProgressBar,
+    private val errorText: TextView
+) {
+    fun show() { controlsOverlay.isVisible = true }
+    fun hide() { controlsOverlay.isVisible = false }
+    fun isVisible(): Boolean = controlsOverlay.isVisible
+    fun update(state: VrPlaybackState) {
+        controlsOverlay.update(state)
+        loading.isVisible = state.durationMs <= 0 && !state.hasError
+        errorText.isVisible = state.hasError
+        errorText.text = state.errorMessage.orEmpty()
+    }
+
+    fun setBlockingError(message: String) {
+        errorText.text = message
+        errorText.visibility = View.VISIBLE
+    }
 }
