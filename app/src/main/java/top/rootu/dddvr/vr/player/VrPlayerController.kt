@@ -12,7 +12,8 @@ class VrPlayerController(
     private val activity: VrPlayerActivity,
     private val playbackSession: PlaybackSession,
     private val projectionManagerProvider: () -> ProjectionManager,
-    private val stereoUvMapper: StereoUvMapper
+    private val stereoUvMapper: StereoUvMapper,
+    private val recenterHeadPose: () -> Unit = {}
 ) {
     fun play() = playbackSession.play()
     fun pause() = playbackSession.pause()
@@ -32,7 +33,19 @@ class VrPlayerController(
     }.getOrDefault(ProjectionType.FLAT)
     fun swapEyes(enabled: Boolean) { stereoUvMapper.swapEyes = enabled }
     fun toggleSwapEyes() { stereoUvMapper.swapEyes = !stereoUvMapper.swapEyes }
-    fun recenter() = Unit
+    fun recenter() = recenterHeadPose()
+
+    fun toggleStereoMode() {
+        val next = when (stereoUvMapper.stereoInputMode) {
+            StereoInputMode.MONO -> StereoInputMode.SBS
+            StereoInputMode.SBS -> StereoInputMode.SBS_REVERSED
+            StereoInputMode.SBS_REVERSED -> StereoInputMode.OU
+            StereoInputMode.OU -> StereoInputMode.OU_REVERSED
+            StereoInputMode.OU_REVERSED -> StereoInputMode.MONO
+            else -> StereoInputMode.MONO
+        }
+        setStereoMode(next)
+    }
     fun exitVrMode() { pause(); activity.finish() }
     fun getCurrentPositionMs(): Long = playbackSession.currentPositionMs
     fun getDurationMs(): Long = playbackSession.durationMs

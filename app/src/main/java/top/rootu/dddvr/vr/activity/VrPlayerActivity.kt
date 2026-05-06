@@ -19,7 +19,9 @@ import androidx.media3.common.Player
 import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
+import top.rootu.dddvr.vr.input.VrControllerInputMapper
 import top.rootu.dddvr.vr.input.VrInputController
+import top.rootu.dddvr.vr.input.VrKeyAction
 import top.rootu.dddvr.vr.player.VrPlayerController
 import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.renderer.VrGLSurfaceView
@@ -63,7 +65,7 @@ class VrPlayerActivity : AppCompatActivity() {
 
         uiLayer = VrUiLayer(controls, loading, errorText)
         inputController = VrInputController(autoHideDelayMs = 8_000L, onShowControls = { uiLayer.show() }, onHideControls = { uiLayer.hide() }, isOverlayVisible = { uiLayer.isVisible() })
-        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper)
+        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = {})
 
         controls.callbacks = object : VrControlsOverlay.Callbacks {
             override fun onPlayPause() = controller.togglePlay()
@@ -112,21 +114,34 @@ class VrPlayerActivity : AppCompatActivity() {
         if (hasFocus) applyImmersiveMode()
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+
+        val action = VrControllerInputMapper.map(event.keyCode)
+        if (action == VrKeyAction.NONE) return super.dispatchKeyEvent(event)
+
         inputController.notifyInteraction()
-        when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_BUTTON_A -> { controller.togglePlay(); inputController.showControls(); return true }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_BUTTON_L1 -> { controller.seekBy(-15_000); inputController.showControls(); return true }
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_BUTTON_R1 -> { controller.seekBy(15_000); inputController.showControls(); return true }
-            KeyEvent.KEYCODE_DPAD_UP -> { inputController.showControls(); return true }
-            KeyEvent.KEYCODE_DPAD_DOWN -> { inputController.hideControls(); return true }
-            KeyEvent.KEYCODE_MENU -> { inputController.toggleControls(); return true }
-            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_BUTTON_B -> {
+        Log.d("DDDVR/Input", "key=${event.keyCode} action=$action overlay=${uiLayer.isVisible()}")
+
+        return when (action) {
+            VrKeyAction.PLAY_PAUSE -> { controller.togglePlay(); true }
+            VrKeyAction.PLAY -> { controller.play(); true }
+            VrKeyAction.PAUSE -> { controller.pause(); true }
+            VrKeyAction.SEEK_BACK -> { controller.seekBy(-15_000); true }
+            VrKeyAction.SEEK_FORWARD -> { controller.seekBy(15_000); true }
+            VrKeyAction.TOGGLE_OVERLAY -> { inputController.toggleControls(); true }
+            VrKeyAction.HIDE_OR_EXIT -> {
                 if (uiLayer.isVisible()) inputController.hideControls() else finish()
-                return true
+                true
             }
+            VrKeyAction.RECENTER -> { controller.recenter(); true }
+            VrKeyAction.TOGGLE_STEREO -> {
+                controller.toggleStereoMode()
+                inputController.showControls()
+                true
+            }
+            VrKeyAction.NONE -> false
         }
-        return super.onKeyDown(keyCode, event)
     }
 
     override fun onDestroy() {
