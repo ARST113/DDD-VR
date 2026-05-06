@@ -1,6 +1,7 @@
 package top.rootu.dddvr.vr.renderer
 
 import android.graphics.SurfaceTexture
+import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.view.Surface
@@ -30,6 +31,7 @@ class VrSceneRenderer(
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         val textureId = IntArray(1)
         GLES20.glGenTextures(1, textureId, 0)
+        configureExternalVideoTexture(textureId[0])
         val surfaceTexture = SurfaceTexture(textureId[0])
         surfaceTexture.setOnFrameAvailableListener(this)
         val surface = Surface(surfaceTexture)
@@ -62,5 +64,13 @@ class VrSceneRenderer(
 
     override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
         frameAvailable = true
+    }
+
+    private fun configureExternalVideoTexture(textureId: Int) {
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
     }
 }
