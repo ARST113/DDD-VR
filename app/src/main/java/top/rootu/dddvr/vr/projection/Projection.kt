@@ -12,7 +12,7 @@ abstract class Projection(
     var maxZoomIn: Float = 1f
     var maxZoomOut: Float = 30f
     var zoomStep: Float = 0.25f
-    protected var headMatrix: FloatArray = floatArrayOf(
+    protected var headPoseMatrix: FloatArray = floatArrayOf(
         1f, 0f, 0f, 0f,
         0f, 1f, 0f, 0f,
         0f, 0f, 1f, 0f,
@@ -32,7 +32,7 @@ abstract class Projection(
     }
 
     open fun setHeadMatrix(matrix: FloatArray) {
-        headMatrix = matrix.copyOf()
+        headPoseMatrix = matrix.copyOf()
     }
 
     abstract fun updateAspectRatio(width: Int, height: Int)
