@@ -57,7 +57,7 @@ class VrPlayerActivity : AppCompatActivity() {
         root.addView(errorText)
         setContentView(root)
 
-        uiLayer = VrUiLayer(root, controls, loading, errorText)
+        uiLayer = VrUiLayer(controls, loading, errorText)
         inputController = VrInputController(onShowControls = { uiLayer.show() }, onHideControls = { uiLayer.hide() }, isOverlayVisible = { uiLayer.isVisible() })
         controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper)
 
@@ -119,5 +119,10 @@ class VrPlayerActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    override fun onDestroy() { controller.release(); super.onDestroy() }
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        inputController.disable()
+        controller.release()
+        super.onDestroy()
+    }
 }

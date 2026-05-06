@@ -23,8 +23,13 @@ class VrPlayerController(
     fun nextItem() = Unit
     fun setStereoMode(mode: StereoInputMode) { stereoUvMapper.stereoInputMode = mode }
     fun getStereoMode(): StereoInputMode = stereoUvMapper.stereoInputMode
-    fun setProjection(type: ProjectionType) = projectionManagerProvider().setCurrentProjectionType(type)
-    fun getProjection(): ProjectionType = projectionManagerProvider().currentProjectionType
+    fun setProjection(type: ProjectionType) = runCatching {
+        projectionManagerProvider().setCurrentProjectionType(type)
+    }.getOrDefault(Unit)
+
+    fun getProjection(): ProjectionType = runCatching {
+        projectionManagerProvider().currentProjectionType
+    }.getOrDefault(ProjectionType.FLAT)
     fun swapEyes(enabled: Boolean) { stereoUvMapper.swapEyes = enabled }
     fun toggleSwapEyes() { stereoUvMapper.swapEyes = !stereoUvMapper.swapEyes }
     fun recenter() = Unit

@@ -1,14 +1,12 @@
 package top.rootu.dddvr.vr.ui
 
 import android.view.View
-import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.isVisible
 import top.rootu.dddvr.vr.player.VrPlaybackState
 
 class VrUiLayer(
-    private val root: FrameLayout,
     val controlsOverlay: VrControlsOverlay,
     private val loading: ProgressBar,
     private val errorText: TextView
