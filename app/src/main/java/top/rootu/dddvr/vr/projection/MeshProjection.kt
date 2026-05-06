@@ -62,7 +62,7 @@ class MeshProjection(type: ProjectionType, mesh: ProjectionMesh) : Projection(ty
         val proj = FloatArray(16)
         val mvp = FloatArray(16)
         Matrix.setIdentityM(view, 0)
-        Matrix.multiplyMM(view, 0, headMatrix, 0, view, 0)
+        Matrix.multiplyMM(view, 0, headPoseMatrix, 0, view, 0)
         Matrix.perspectiveM(proj, 0, 90f, (half.toFloat() / height).coerceAtLeast(0.01f), 0.1f, 100f)
         Matrix.multiplyMM(mvp, 0, proj, 0, view, 0)
 
