@@ -37,14 +37,17 @@ void OpenXrApp::loop(){
         XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime=fs.predictedDisplayTime; li.space=session_.appSpace();
         XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count=0; auto lr=xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); XR_LOGI("DDDVR/OpenXRRenderer","xrLocateViews=%d count=%u",lr,count);
 
-        int idx = swapchain_.acquireImage(); XR_LOGI("DDDVR/OpenXRRenderer","swapchain image=%d",idx);
+        int idx = swapchain_.acquireImage(); XR_LOGI("DDDVR/OpenXRRenderer","swapchain image=%d tex=%u",idx,swapchain_.activeColorTexture());
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        // Render each eye to same image as debug path.
-        renderer_.renderEye(0, swapchain_.width(), swapchain_.height());
-        renderer_.renderEye(1, swapchain_.width(), swapchain_.height());
-        auto fb = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-        XR_LOGI("DDDVR/OpenXRRenderer","fbo status=0x%x glErr=0x%x",fb,glGetError());
-        swapchain_.releaseImage();
+        bool fboOk = true;
+        for (int eye=0; eye<2; ++eye) {
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(), 0, eye);
+            auto fb = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            auto err = glGetError();
+            XR_LOGI("DDDVR/OpenXRRenderer","eye=%d fbo status=0x%x glErr=0x%x",eye,fb,err);
+            if (fb != GL_FRAMEBUFFER_COMPLETE) { fboOk = false; break; }
+            renderer_.renderEye(eye, swapchain_.width(), swapchain_.height());
+        }
 
         XrCompositionLayerProjectionView projectionViews[2]{};
         for (int eye=0; eye<2; ++eye) {
@@ -62,8 +65,11 @@ void OpenXrApp::loop(){
         layer.views = projectionViews;
         const XrCompositionLayerBaseHeader* layers[] = {reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer)};
 
-        XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO}; ei.displayTime=fs.predictedDisplayTime; ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE; ei.layerCount=1; ei.layers=layers;
+        XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO}; ei.displayTime=fs.predictedDisplayTime; ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        if (fboOk) { ei.layerCount=1; ei.layers=layers; }
+        else { ei.layerCount=0; ei.layers=nullptr; XR_LOGE("DDDVR/OpenXRRenderer","Skipping layer submit due to incomplete FBO"); }
         auto er=xrEndFrame(session_.session(), &ei); XR_LOGI("DDDVR/OpenXRRenderer","xrEndFrame=%d",er);
+        swapchain_.releaseImage();
     }
 #else
     while(running_){ std::this_thread::sleep_for(std::chrono::milliseconds(16)); }

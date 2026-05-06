@@ -6,6 +6,7 @@
 #define HAS_OPENXR 0
 #endif
 #include <vector>
+#include <GLES3/gl3.h>
 
 class OpenXrSwapchain {
 public:
@@ -16,10 +17,12 @@ public:
     XrSwapchain handle() const { return swapchain_; }
     int32_t width() const { return width_; }
     int32_t height() const { return height_; }
+    GLuint activeColorTexture() const;
 #else
     bool create(void*, int32_t, int32_t) { return false; }
     int acquireImage() { return -1; }
     void releaseImage() {}
+    GLuint activeColorTexture() const { return 0; }
 #endif
 private:
 #if HAS_OPENXR

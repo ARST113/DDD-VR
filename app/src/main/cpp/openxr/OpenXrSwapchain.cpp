@@ -31,4 +31,8 @@ void OpenXrSwapchain::releaseImage() {
     XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
     xrReleaseSwapchainImage(swapchain_, &ri);
 }
+GLuint OpenXrSwapchain::activeColorTexture() const {
+    if (activeIndex_ >= images_.size()) return 0;
+    return images_[activeIndex_].image;
+}
 #endif
