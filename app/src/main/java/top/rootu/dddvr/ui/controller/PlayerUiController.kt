@@ -6,7 +6,6 @@ import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
@@ -45,7 +44,6 @@ class PlayerUiController(private val rootView: View) {
 
     // Surfaces & Containers
     val aspectRatioFrame: AspectRatioFrameLayout = rootView.findViewById(R.id.aspect_ratio_frame)
-    val standardSurfaceView: SurfaceView = rootView.findViewById(R.id.surface_view_standard)
     val glSurfaceView: StereoGLSurfaceView = rootView.findViewById(R.id.gl_surface_view)
 
     // Views
@@ -503,14 +501,10 @@ class PlayerUiController(private val rootView: View) {
         }
     }
 
-    fun setSurfaceMode(isStereo: Boolean) {
-        if (isStereo) {
-            aspectRatioFrame.visibility = View.GONE
-            glSurfaceView.visibility = View.VISIBLE
-        } else {
-            aspectRatioFrame.visibility = View.VISIBLE
-            glSurfaceView.visibility = View.GONE
-        }
+    fun setSurfaceMode(@Suppress("UNUSED_PARAMETER") isStereo: Boolean) {
+        // Pure VR mode: always keep GL surface active.
+        aspectRatioFrame.visibility = View.GONE
+        glSurfaceView.visibility = View.VISIBLE
     }
 
     fun setAspectRatio(ratio: Float) {
