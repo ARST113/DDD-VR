@@ -24,6 +24,7 @@ import top.rootu.dddvr.vr.input.VrInputController
 import top.rootu.dddvr.vr.input.VrKeyAction
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
+import top.rootu.dddvr.vr.pose.AndroidRotationVectorPoseProvider
 import top.rootu.dddvr.vr.player.VrPlayerController
 import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.renderer.VrGLSurfaceView
@@ -39,6 +40,7 @@ class VrPlayerActivity : AppCompatActivity() {
     private lateinit var controller: VrPlayerController
     private lateinit var uiLayer: VrUiLayer
     private lateinit var inputController: VrInputController
+    private lateinit var poseProvider: AndroidRotationVectorPoseProvider
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,7 +53,8 @@ class VrPlayerActivity : AppCompatActivity() {
 
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
-        renderer = VrSceneRenderer { surface -> playbackSession.attachSurface(surface) }
+        poseProvider = AndroidRotationVectorPoseProvider(this)
+        renderer = VrSceneRenderer(onSurfaceReady = { surface -> playbackSession.attachSurface(surface) }, poseProvider = poseProvider)
 
         val root = FrameLayout(this)
         val surfaceView = VrGLSurfaceView(this, renderer)
@@ -67,7 +70,7 @@ class VrPlayerActivity : AppCompatActivity() {
 
         uiLayer = VrUiLayer(controls, loading, errorText)
         inputController = VrInputController(autoHideDelayMs = 8_000L, onShowControls = { uiLayer.show() }, onHideControls = { uiLayer.hide() }, isOverlayVisible = { uiLayer.isVisible() })
-        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = {})
+        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = { poseProvider.recenter() })
 
         controls.callbacks = object : VrControlsOverlay.Callbacks {
             override fun onPlayPause() = controller.togglePlay()
@@ -93,12 +96,7 @@ class VrPlayerActivity : AppCompatActivity() {
             StereoLayout.OU -> StereoInputMode.OU
             StereoLayout.MONO -> request.stereoInputMode
         }
-        val projection = when (config.projectionMode) {
-            ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
-            ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
-            ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
-            ProjectionMode.VR_FLAT_SCREEN -> request.projectionType
-        }
+        val projection = mapProjectionMode(config.projectionMode, request.projectionType)
 
         controller.setStereoMode(stereoMode)
         controller.setProjection(projection)
@@ -122,6 +120,7 @@ class VrPlayerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        poseProvider.start()
         applyImmersiveMode()
     }
 
@@ -160,11 +159,23 @@ class VrPlayerActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        poseProvider.stop()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         inputController.disable()
         controller.release()
         super.onDestroy()
+    }
+
+    internal fun mapProjectionMode(mode: ProjectionMode, fallback: ProjectionType): ProjectionType = when (mode) {
+        ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
+        ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
+        ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
+        ProjectionMode.VR_FLAT_SCREEN -> fallback
     }
 
     private fun applyImmersiveMode() {
