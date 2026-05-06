@@ -119,6 +119,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
 
     // Храним ссылку на GL Surface
     private var glSurface: Surface? = null
+    private var pendingSurfaceBindPlayer: Player? = null
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -243,15 +244,15 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
     }
 
     private fun attachSurfaceToPlayer(player: Player) {
-        // Проверяем текущий режим, чтобы привязать нужную поверхность
-        if (viewModel.inputType.value != StereoInputType.NONE) {
-            // 3D режим -> GL Surface
-            if (glSurface != null) {
-                player.setVideoSurface(glSurface)
-            }
+        // Pure VR path: always render through GL surface.
+        ui.setSurfaceMode(true)
+        ui.glSurfaceView.onResume()
+        val surface = glSurface
+        if (surface != null) {
+            player.setVideoSurface(surface)
+            pendingSurfaceBindPlayer = null
         } else {
-            // 2D режим -> Standard SurfaceView
-            player.setVideoSurfaceView(ui.standardSurfaceView)
+            pendingSurfaceBindPlayer = player
         }
     }
 
@@ -1014,19 +1015,13 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
             ui.seekBar.secondaryProgress = bufferedPos.toInt()
         }
 
-        // Переключение поверхностей (HDR Fix)
+        // Pure VR surface routing: input type changes only update stereo mapping/icon state.
         viewModel.inputType.observe(viewLifecycleOwner) { type ->
-            val isStereo = type != StereoInputType.NONE
-            ui.setSurfaceMode(isStereo)
+            ui.setSurfaceMode(true)
             viewModel.player?.let { player ->
-                if (isStereo) {
-                    ui.glSurfaceView.onResume()
-                    stereoRenderer?.setInputType(type)
-                    if (glSurface != null) player.setVideoSurface(glSurface)
-                } else {
-                    ui.glSurfaceView.onPause()
-                    player.setVideoSurfaceView(ui.standardSurfaceView)
-                }
+                ui.glSurfaceView.onResume()
+                stereoRenderer?.setInputType(type)
+                glSurface?.let(player::setVideoSurface)
             }
             ui.updateStereoLayout(viewModel.outputMode.value, viewModel.screenSeparation.value ?: 0f)
             ui.updateInputModeIcon(type, viewModel.swapEyes.value ?: false)
@@ -1355,9 +1350,11 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
 
     override fun onSurfaceReady(surface: Surface) {
         this.glSurface = surface
-        viewModel.player?.let { player ->
-            if (viewModel.inputType.value != StereoInputType.NONE) {
-                activity?.runOnUiThread { player.setVideoSurface(surface) }
+        val targetPlayer = pendingSurfaceBindPlayer ?: viewModel.player
+        targetPlayer?.let { player ->
+            activity?.runOnUiThread {
+                player.setVideoSurface(surface)
+                pendingSurfaceBindPlayer = null
             }
         }
     }
@@ -1374,9 +1371,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
         // Проверяем, нужно ли перезапустить плеер из-за смены настроек
         viewModel.checkSettingsAndRestart()
         viewModel.player?.playWhenReady = true
-        if (viewModel.inputType.value != StereoInputType.NONE) {
-            ui.glSurfaceView.onResume()
-        }
+        ui.glSurfaceView.onResume()
     }
 
     override fun onPause() {
@@ -1399,6 +1394,7 @@ class PlayerFragment : Fragment(), OnSurfaceReadyListener {
         stereoRenderer?.release()
         stereoRenderer = null
         glSurface = null
+        pendingSurfaceBindPlayer = null
 
         // Восстанавливаем оригинальный режим ТВ при выходе
         activity?.let {

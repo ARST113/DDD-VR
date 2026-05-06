@@ -22,6 +22,9 @@ import top.rootu.dddvr.player.PlayerManager
 import top.rootu.dddvr.vr.input.VrControllerInputMapper
 import top.rootu.dddvr.vr.input.VrInputController
 import top.rootu.dddvr.vr.input.VrKeyAction
+import top.rootu.dddvr.vr.model.ProjectionMode
+import top.rootu.dddvr.vr.model.StereoLayout
+import top.rootu.dddvr.vr.pose.AndroidRotationVectorPoseProvider
 import top.rootu.dddvr.vr.player.VrPlayerController
 import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.renderer.VrGLSurfaceView
@@ -37,6 +40,9 @@ class VrPlayerActivity : AppCompatActivity() {
     private lateinit var controller: VrPlayerController
     private lateinit var uiLayer: VrUiLayer
     private lateinit var inputController: VrInputController
+    private lateinit var poseProvider: AndroidRotationVectorPoseProvider
+    private lateinit var surfaceView: VrGLSurfaceView
+    private var initialized = false
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,12 +53,25 @@ class VrPlayerActivity : AppCompatActivity() {
         applyImmersiveMode()
         Log.i("DDDVR/Activity", "fullscreen setup done")
 
+        val request = VrIntentParser.parse(intent) ?: run {
+            val fallback = TextView(this)
+            fallback.text = "Invalid intent"
+            setContentView(fallback)
+            return
+        }
+        val initialProjection = mapProjectionMode(request.vrConfig.projectionMode, request.projectionType)
+
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
-        renderer = VrSceneRenderer { surface -> playbackSession.attachSurface(surface) }
+        poseProvider = AndroidRotationVectorPoseProvider(this)
+        renderer = VrSceneRenderer(
+            onSurfaceReady = { surface -> playbackSession.attachSurface(surface) },
+            poseProvider = poseProvider,
+            initialProjectionType = initialProjection
+        )
 
         val root = FrameLayout(this)
-        val surfaceView = VrGLSurfaceView(this, renderer)
+        surfaceView = VrGLSurfaceView(this, renderer)
         val controls = VrControlsOverlay(this)
         val loading = ProgressBar(this)
         val errorText = TextView(this)
@@ -65,7 +84,7 @@ class VrPlayerActivity : AppCompatActivity() {
 
         uiLayer = VrUiLayer(controls, loading, errorText)
         inputController = VrInputController(autoHideDelayMs = 8_000L, onShowControls = { uiLayer.show() }, onHideControls = { uiLayer.hide() }, isOverlayVisible = { uiLayer.isVisible() })
-        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = {})
+        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = { poseProvider.recenter() })
 
         controls.callbacks = object : VrControlsOverlay.Callbacks {
             override fun onPlayPause() = controller.togglePlay()
@@ -74,23 +93,28 @@ class VrPlayerActivity : AppCompatActivity() {
             override fun onStereo(mode: String) = controller.setStereoMode(StereoInputMode.valueOf(mode))
             override fun onProjection(type: String) = controller.setProjection(ProjectionType.valueOf(type))
             override fun onToggleSwapEyes() = controller.toggleSwapEyes()
-            override fun onRecenter() = Unit
+            override fun onRecenter() = controller.recenter()
             override fun onExit() = controller.exitVrMode()
             override fun onInteraction() = inputController.notifyInteraction()
             override fun onControlsInteractionStart() = inputController.notifyControlsInteractionStart()
             override fun onControlsInteractionEnd() = inputController.notifyControlsInteractionEnd()
         }
 
-        val request = VrIntentParser.parse(intent) ?: run {
-            uiLayer.setBlockingError("Invalid intent")
-            return
+        val config = request.vrConfig
+        val stereoMode = when {
+            request.hasStereoLayoutExtra && config.stereoLayout == StereoLayout.MONO -> StereoInputMode.MONO
+            config.stereoLayout == StereoLayout.SBS -> StereoInputMode.SBS
+            config.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
+            else -> request.stereoInputMode
         }
-        controller.setStereoMode(request.stereoInputMode)
-        controller.setProjection(request.projectionType)
+
+        controller.setStereoMode(stereoMode)
+        controller.swapEyes(config.swapEyes)
         playerManager.loadPlaylist(listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)), 0, request.startPositionMs)
         inputController.enable()
         uiLayer.show()
         startUiLoop()
+        initialized = true
     }
 
     private fun startUiLoop() {
@@ -106,6 +130,10 @@ class VrPlayerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!initialized) return
+
+        poseProvider.start()
+        surfaceView.onResume()
         applyImmersiveMode()
     }
 
@@ -144,11 +172,28 @@ class VrPlayerActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        if (initialized) {
+            poseProvider.stop()
+            surfaceView.onPause()
+        }
+        super.onPause()
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        inputController.disable()
-        controller.release()
+        if (initialized) {
+            inputController.disable()
+            controller.release()
+        }
         super.onDestroy()
+    }
+
+    internal fun mapProjectionMode(mode: ProjectionMode, fallback: ProjectionType): ProjectionType = when (mode) {
+        ProjectionMode.VR180 -> ProjectionType.EQUIRECT_180
+        ProjectionMode.VR360 -> ProjectionType.EQUIRECT_360
+        ProjectionMode.VR_CURVED_SCREEN -> ProjectionType.CURVED
+        ProjectionMode.VR_FLAT_SCREEN -> ProjectionType.FLAT
     }
 
     private fun applyImmersiveMode() {
