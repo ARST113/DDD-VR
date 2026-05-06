@@ -28,7 +28,7 @@ class VrPlayerController(
     }.getOrDefault(Unit)
 
     fun getProjection(): ProjectionType = runCatching {
-        projectionManagerProvider().currentProjectionType
+        projectionManagerProvider().getCurrentProjectionType()
     }.getOrDefault(ProjectionType.FLAT)
     fun swapEyes(enabled: Boolean) { stereoUvMapper.swapEyes = enabled }
     fun toggleSwapEyes() { stereoUvMapper.swapEyes = !stereoUvMapper.swapEyes }
