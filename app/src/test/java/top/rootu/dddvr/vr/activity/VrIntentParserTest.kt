@@ -5,9 +5,14 @@ import android.net.Uri
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
 
+@RunWith(RobolectricTestRunner::class)
+@Config(manifest = Config.NONE)
 class VrIntentParserTest {
 
     @Test
