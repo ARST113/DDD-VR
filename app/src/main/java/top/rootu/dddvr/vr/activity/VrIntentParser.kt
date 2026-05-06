@@ -11,6 +11,16 @@ import top.rootu.dddvr.vr.projection.ProjectionType
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 
 object VrIntentParser {
+    private fun getLongOrIntExtraCompat(intent: Intent, key: String, defaultValue: Long): Long {
+        val b = intent.extras
+        val raw = b?.get(key)
+        return when (raw) {
+            is Long -> raw
+            is Int -> raw.toLong()
+            is String -> raw.toLongOrNull() ?: defaultValue
+            else -> if (intent.hasExtra(key)) intent.getLongExtra(key, defaultValue) else defaultValue
+        }
+    }
     private const val EXTRA_STEREO_MODE = "stereo_mode"
     private const val EXTRA_START_POSITION_MS = "start_position_ms"
     private const val EXTRA_PROJECTION = "projection"
@@ -35,7 +45,8 @@ object VrIntentParser {
             "equirect_360" -> ProjectionType.EQUIRECT_360
             else -> ProjectionType.FLAT
         }
-        val startPositionMs = intent.getLongExtra(EXTRA_START_POSITION_MS, intent.getLongExtra(EXTRA_START_POSITION, 0L)).coerceAtLeast(0L)
+        val startPositionMs = getLongOrIntExtraCompat(intent, EXTRA_START_POSITION_MS, getLongOrIntExtraCompat(intent, EXTRA_START_POSITION, 0L)).coerceAtLeast(0L)
+        val hasStereoLayoutExtra = intent.hasExtra(EXTRA_STEREO_LAYOUT)
         val layout = when (intent.getStringExtra(EXTRA_STEREO_LAYOUT)?.lowercase()) {
             "sbs" -> StereoLayout.SBS
             "ou" -> StereoLayout.OU
@@ -65,7 +76,8 @@ object VrIntentParser {
                 stereoLayout = layout,
                 stereoPacking = packing,
                 swapEyes = swapEyes
-            )
+            ),
+            hasStereoLayoutExtra = hasStereoLayoutExtra
         )
     }
 }

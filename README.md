@@ -22,6 +22,8 @@
 
 **DDD Video Player** is being refactored into a pure VR-focused video player for Android. The playback pipeline is centered on GL/VR rendering instead of a legacy flat 2D player path.
 
+**Note:** this is a staged refactor. Legacy stereo/anaglyph renderer and related compatibility model layers still exist temporarily while VR-first modules are migrated incrementally.
+
 Use a **Cardboard VR-compatible headset** for immersive playback.
 
 ### Key Features

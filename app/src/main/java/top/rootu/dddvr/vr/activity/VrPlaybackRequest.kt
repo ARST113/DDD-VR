@@ -11,5 +11,6 @@ data class VrPlaybackRequest(
     val stereoInputMode: StereoInputMode,
     val projectionType: ProjectionType,
     val startPositionMs: Long,
-    val vrConfig: VrPlaybackConfig
+    val vrConfig: VrPlaybackConfig,
+    val hasStereoLayoutExtra: Boolean
 )
