@@ -15,7 +15,7 @@ bool OpenXrApp::initialize(){
     if(!session_.createReferenceSpace()) return false;
     renderer_.initialize();
 #if HAS_OPENXR
-    swapchain_.create(session_.session(), 2048, 2048);
+    swapchain_.create(session_.session(), (int32_t)session_.recommendedWidth(), (int32_t)session_.recommendedHeight());
 #endif
     return true;
 }
@@ -32,10 +32,13 @@ void OpenXrApp::loop(){
     while(running_){
         session_.pollEvents();
         XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; auto wr=xrWaitFrame(session_.session(), &wi, &fs); XR_LOGI("DDDVR/OpenXRRenderer","xrWaitFrame=%d",wr);
+        if (wr != XR_SUCCESS) { continue; }
         XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; auto br=xrBeginFrame(session_.session(), &bi); XR_LOGI("DDDVR/OpenXRRenderer","xrBeginFrame=%d",br);
+        if (br != XR_SUCCESS) { continue; }
 
         XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime=fs.predictedDisplayTime; li.space=session_.appSpace();
         XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count=0; auto lr=xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); XR_LOGI("DDDVR/OpenXRRenderer","xrLocateViews=%d count=%u",lr,count);
+        if (lr != XR_SUCCESS) { XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO}; ei.displayTime=fs.predictedDisplayTime; ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE; ei.layerCount=0; ei.layers=nullptr; xrEndFrame(session_.session(), &ei); continue; }
 
         int idx = swapchain_.acquireImage(); XR_LOGI("DDDVR/OpenXRRenderer","swapchain image=%d tex=%u",idx,swapchain_.activeColorTexture());
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
