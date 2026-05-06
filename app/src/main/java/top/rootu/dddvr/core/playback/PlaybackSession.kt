@@ -38,6 +38,19 @@ class PlaybackSession(
             return value
         }
 
+
+    val durationMs: Long
+        get() {
+            if (!isMainThread()) return 0L
+            return playerManager.exoPlayer?.duration ?: 0L
+        }
+
+    val bufferedPositionMs: Long
+        get() {
+            if (!isMainThread()) return 0L
+            return playerManager.exoPlayer?.bufferedPosition ?: 0L
+        }
+
     fun attachSurface(surface: Surface) {
         runOnPlayerThread {
             playerManager.exoPlayer?.setVideoSurface(surface)
