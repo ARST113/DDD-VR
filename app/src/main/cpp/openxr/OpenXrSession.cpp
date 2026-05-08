@@ -1,4 +1,5 @@
 #include "OpenXrSession.h"
+#include "OpenXrLoader.h"
 
 #include "../util/XrLog.h"
 
@@ -54,18 +55,11 @@ bool OpenXrSession::initEgl() {
 bool OpenXrSession::initialize() {
     XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initialize enter");
     XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::calling initializeLoader");
-    XrLoaderInitInfoAndroidKHR loaderInfo{XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
-    PFN_xrInitializeLoaderKHR initializeLoaderFn = nullptr;
-    XrResult loaderResult = xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", reinterpret_cast<PFN_xrVoidFunction*>(&initializeLoaderFn));
-    if (loaderResult == XR_SUCCESS && initializeLoaderFn != nullptr) {
-        loaderResult = initializeLoaderFn(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loaderInfo));
-    } else {
-        loaderResult = XR_ERROR_FUNCTION_UNSUPPORTED;
-    }
+    const XrResult loaderResult = dddvr::openxr::initializeLoader();
     const bool loaderOk = loaderResult == XR_SUCCESS;
     XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initializeLoader result=%s code=%d", loaderOk ? "true" : "false", loaderResult);
     if (!loaderOk) {
-        lastError_ = "xrInitializeLoaderKHR failed";
+        lastError_ = "xrInitializeLoaderKHR failed: " + std::to_string(loaderResult);
         return false;
     }
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME)) {
