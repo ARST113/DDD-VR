@@ -7,6 +7,14 @@
 bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init deferred to render thread"); return true; }
 
 bool OpenXrApp::start() {
+    if (!initialized_) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: not initialized");
+        return false;
+    }
+    if (!session_.hasInstance()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: invalid XrInstance");
+        return false;
+    }
     if (running_) return true;
     running_ = true; sessionRunning_ = false; initDone_ = false; initOk_ = false;
     thread_ = std::thread(&OpenXrApp::loop, this);
@@ -35,6 +43,15 @@ void OpenXrApp::loop() {
     if (!initOk_) { running_ = false; return; }
     std::vector<XrView> views(2, {XR_TYPE_VIEW}); GLuint fbo = 0; glGenFramebuffers(1, &fbo);
     while (running_) {
+        if (!initialized_ || !session_.hasInstance()) {
+            if (!loggedInvalidLoopState) {
+                XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop stopping: session instance invalid");
+                loggedInvalidLoopState = true;
+            }
+            running_ = false;
+            break;
+        }
+
         session_.pollEvents();
         if (!sessionRunning_ && session_.currentState() == XR_SESSION_STATE_READY) sessionRunning_ = session_.begin();
         if (!sessionRunning_) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
