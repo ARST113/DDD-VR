@@ -16,11 +16,11 @@ bool OpenXrApp::start() {
         return false;
     }
     if (running_) return true;
-    running_ = true; sessionRunning_ = false; initDone_ = false; initOk_ = false;
+    running_ = true; sessionRunning_ = false; initDone_ = false; initOk_ = false; initialized_ = false;
     thread_ = std::thread(&OpenXrApp::loop, this);
     std::unique_lock<std::mutex> lk(initMutex_);
     initCv_.wait(lk, [this] { return initDone_; });
-    if (!initOk_) { XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: not initialized"); stopAndJoinThread(); return false; }
+    if (!initOk_) { XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start failed: %s", lastError_.c_str()); stopAndJoinThread(); return false; }
     initialized_ = true;
     return true;
 }
@@ -41,17 +41,20 @@ void OpenXrApp::loop() {
     { std::lock_guard<std::mutex> lk(initMutex_); initDone_ = true; }
     initCv_.notify_all();
     if (!initOk_) { running_ = false; return; }
-    std::vector<XrView> views(2, {XR_TYPE_VIEW}); GLuint fbo = 0; glGenFramebuffers(1, &fbo);
+    std::vector<XrView> views(2, {XR_TYPE_VIEW});
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    bool loggedInvalidLoopState = false;
+
     while (running_) {
-        if (!initialized_ || !session_.hasInstance()) {
+        if (!initialized_) {
             if (!loggedInvalidLoopState) {
-                XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop stopping: session instance invalid");
+                XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop invalid state: initialized=false");
                 loggedInvalidLoopState = true;
             }
-            running_ = false;
-            break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
         }
-
         session_.pollEvents();
         if (!sessionRunning_ && session_.currentState() == XR_SESSION_STATE_READY) sessionRunning_ = session_.begin();
         if (!sessionRunning_) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
