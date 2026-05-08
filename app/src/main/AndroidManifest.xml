@@ -36,7 +36,11 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/AppTheme">
 
-        <activity
+                <meta-data
+            android:name="pvr.app.type"
+            android:value="vr" />
+
+<activity
             android:name=".vr.activity.VrPlayerActivity"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
