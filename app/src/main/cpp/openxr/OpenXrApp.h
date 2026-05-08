@@ -29,6 +29,7 @@ private:
     OpenXrRenderer renderer_;
     OpenXrInput input_;
     std::thread thread_;
+    std::atomic<bool> initialized_{false};
     std::atomic<bool> running_{false};
     std::atomic<bool> sessionRunning_{false};
 };

@@ -7,7 +7,9 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv*, jobject, jobject, jobject) {
     auto* app = new OpenXrApp();
     if (!app->initialize()) {
-        XR_LOGE("DDDVR/OpenXR", "OpenXR runtime unavailable reason=%s", app->lastError().c_str());
+        XR_LOGE("DDDVR/OpenXR", "failed to initialize app reason=%s", app->lastError().c_str());
+        delete app;
+        return 0;
     }
     return reinterpret_cast<jlong>(app);
 }
