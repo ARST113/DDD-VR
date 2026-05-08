@@ -17,10 +17,12 @@ public:
     unsigned int videoTextureId() const { return renderer_.videoTextureId(); }
 private:
     void loop();
+    void requestStopAndJoin();
     OpenXrSession session_;
     OpenXrSwapchain swapchain_;
     OpenXrRenderer renderer_;
     OpenXrInput input_;
     std::thread thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> sessionRunning_{false};
 };

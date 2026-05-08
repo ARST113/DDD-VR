@@ -1,13 +1,6 @@
 #pragma once
 #include <string>
-#if __has_include(<openxr/openxr.h>)
-#include <openxr/openxr.h>
-#define HAS_OPENXR 1
-#else
-#define HAS_OPENXR 0
-using XrSessionState = int;
-#endif
-#include <EGL/egl.h>
+#include "OpenXrPlatform.h"
 
 class OpenXrSession {
 public:
@@ -18,18 +11,16 @@ public:
     void pollEvents();
     bool runtimeAvailable() const { return runtimeAvailable_; }
     const std::string& lastError() const { return lastError_; }
-#if HAS_OPENXR
     XrInstance instance() const { return instance_; }
     XrSystemId systemId() const { return systemId_; }
     XrSession session() const { return session_; }
     XrSpace appSpace() const { return appSpace_; }
+    XrSessionState state() const { return state_; }
     uint32_t recommendedWidth() const { return recWidth_; }
     uint32_t recommendedHeight() const { return recHeight_; }
-#endif
 private:
     bool runtimeAvailable_ = false;
     std::string lastError_;
-#if HAS_OPENXR
     bool initEgl();
     bool hasExtension(const char* name);
     XrInstance instance_{XR_NULL_HANDLE};
@@ -43,5 +34,4 @@ private:
     EGLSurface eglSurface_{EGL_NO_SURFACE};
     uint32_t recWidth_ = 2048;
     uint32_t recHeight_ = 2048;
-#endif
 };

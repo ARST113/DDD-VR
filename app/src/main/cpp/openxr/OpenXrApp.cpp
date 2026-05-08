@@ -1,12 +1,6 @@
 #include "OpenXrApp.h"
+#include "OpenXrPlatform.h"
 #include "../util/XrLog.h"
-#if __has_include(<openxr/openxr.h>)
-#include <openxr/openxr.h>
-#define HAS_OPENXR 1
-#else
-#define HAS_OPENXR 0
-#endif
-#include <GLES3/gl3.h>
 #include <chrono>
 
 bool OpenXrApp::initialize(){
@@ -14,23 +8,57 @@ bool OpenXrApp::initialize(){
     if(!session_.createSession()) return false;
     if(!session_.createReferenceSpace()) return false;
     renderer_.initialize();
-#if HAS_OPENXR
     swapchain_.create(session_.session(), (int32_t)session_.recommendedWidth(), (int32_t)session_.recommendedHeight());
-#endif
     return true;
 }
 
-bool OpenXrApp::start(){ if(!session_.begin()) return false; running_=true; thread_=std::thread(&OpenXrApp::loop,this); return true; }
-void OpenXrApp::pause(){ running_=false; }
-void OpenXrApp::resume(){ if(!running_){ running_=true; if(!thread_.joinable()) thread_=std::thread(&OpenXrApp::loop,this);} }
-void OpenXrApp::destroy(){ running_=false; if(thread_.joinable()) thread_.join(); }
+bool OpenXrApp::start(){
+    if (running_) return true;
+    running_ = true;
+    thread_ = std::thread(&OpenXrApp::loop, this);
+    return true;
+}
+
+void OpenXrApp::requestStopAndJoin() {
+    running_ = false;
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
+void OpenXrApp::pause(){ requestStopAndJoin(); }
+void OpenXrApp::resume(){ if(!running_){ start(); } }
+void OpenXrApp::destroy(){ requestStopAndJoin(); }
 
 void OpenXrApp::loop(){
-#if HAS_OPENXR
     std::vector<XrView> views(2, {XR_TYPE_VIEW});
     GLuint fbo=0; glGenFramebuffers(1,&fbo);
     while(running_){
         session_.pollEvents();
+        const auto state = session_.state();
+        if (!sessionRunning_ && state == XR_SESSION_STATE_READY) {
+            if (session_.begin()) {
+                sessionRunning_ = true;
+            } else {
+                XR_LOGE("DDDVR/OpenXRSession", "xrBeginSession failed from READY state");
+                running_ = false;
+                break;
+            }
+        }
+        if (sessionRunning_ && state == XR_SESSION_STATE_STOPPING) {
+            const XrResult endResult = xrEndSession(session_.session());
+            XR_LOGI("DDDVR/OpenXRSession", "xrEndSession=%d", endResult);
+            sessionRunning_ = false;
+            continue;
+        }
+        if (state == XR_SESSION_STATE_EXITING || state == XR_SESSION_STATE_LOSS_PENDING) {
+            running_ = false;
+            break;
+        }
+        if (!sessionRunning_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
         XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; auto wr=xrWaitFrame(session_.session(), &wi, &fs); XR_LOGI("DDDVR/OpenXRRenderer","xrWaitFrame=%d",wr);
         if (wr != XR_SUCCESS) { continue; }
         XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; auto br=xrBeginFrame(session_.session(), &bi); XR_LOGI("DDDVR/OpenXRRenderer","xrBeginFrame=%d",br);
@@ -74,7 +102,4 @@ void OpenXrApp::loop(){
         auto er=xrEndFrame(session_.session(), &ei); XR_LOGI("DDDVR/OpenXRRenderer","xrEndFrame=%d",er);
         swapchain_.releaseImage();
     }
-#else
-    while(running_){ std::this_thread::sleep_for(std::chrono::milliseconds(16)); }
-#endif
 }

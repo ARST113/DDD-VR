@@ -36,6 +36,10 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/AppTheme">
 
+        <meta-data
+            android:name="pvr.app.type"
+            android:value="vr" />
+
         <activity
             android:name=".vr.activity.VrPlayerActivity"
             android:exported="true"
