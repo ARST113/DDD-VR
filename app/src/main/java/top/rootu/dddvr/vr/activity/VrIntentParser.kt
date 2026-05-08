@@ -65,7 +65,9 @@ object VrIntentParser {
             else -> ProjectionMode.VR_FLAT_SCREEN
         }
         val swapEyes = intent.getBooleanExtra(EXTRA_SWAP_EYES, false)
-        Log.i("DDDVR/Intent", "uri=$uri stereo=$mode projection=$projection startMs=$startPositionMs type=${intent.type}")
+        runCatching {
+            Log.i("DDDVR/Intent", "uri=$uri stereo=$mode projection=$projection startMs=$startPositionMs type=${intent.type}")
+        }
         return VrPlaybackRequest(
             uri = uri,
             title = intent.getStringExtra(Intent.EXTRA_TITLE),
