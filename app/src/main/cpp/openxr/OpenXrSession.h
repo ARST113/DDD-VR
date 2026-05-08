@@ -15,6 +15,8 @@ public:
     XrSessionState currentState() const { return state_; }
 
     bool runtimeAvailable() const { return runtimeAvailable_; }
+    bool hasInstance() const { return instance_ != XR_NULL_HANDLE; }
+    bool isInitialized() const { return instance_ != XR_NULL_HANDLE && systemId_ != XR_NULL_SYSTEM_ID; }
     const std::string& lastError() const { return lastError_; }
     XrInstance instance() const { return instance_; }
     XrSystemId systemId() const { return systemId_; }

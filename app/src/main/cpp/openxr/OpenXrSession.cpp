@@ -52,6 +52,22 @@ bool OpenXrSession::initEgl() {
 }
 
 bool OpenXrSession::initialize() {
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initialize enter");
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::calling initializeLoader");
+    XrLoaderInitInfoAndroidKHR loaderInfo{XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
+    PFN_xrInitializeLoaderKHR initializeLoaderFn = nullptr;
+    XrResult loaderResult = xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", reinterpret_cast<PFN_xrVoidFunction*>(&initializeLoaderFn));
+    if (loaderResult == XR_SUCCESS && initializeLoaderFn != nullptr) {
+        loaderResult = initializeLoaderFn(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loaderInfo));
+    } else {
+        loaderResult = XR_ERROR_FUNCTION_UNSUPPORTED;
+    }
+    const bool loaderOk = loaderResult == XR_SUCCESS;
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initializeLoader result=%s code=%d", loaderOk ? "true" : "false", loaderResult);
+    if (!loaderOk) {
+        lastError_ = "xrInitializeLoaderKHR failed";
+        return false;
+    }
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME)) {
         lastError_ = "XR_KHR_opengl_es_enable missing";
         return false;
@@ -65,7 +81,7 @@ bool OpenXrSession::initialize() {
     XrResult r = xrCreateInstance(&ci, &instance_);
     XR_LOGI("DDDVR/OpenXRSession", "xrCreateInstance result=%d", r);
     if (r != XR_SUCCESS) {
-        lastError_ = "xrCreateInstance failed";
+        lastError_ = "xrCreateInstance failed: " + std::to_string(r);
         return false;
     }
     XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
@@ -73,7 +89,7 @@ bool OpenXrSession::initialize() {
     r = xrGetSystem(instance_, &sgi, &systemId_);
     XR_LOGI("DDDVR/OpenXRSession", "xrGetSystem result=%d", r);
     if (r != XR_SUCCESS) {
-        lastError_ = "xrGetSystem failed";
+        lastError_ = "xrGetSystem failed: " + std::to_string(r);
         return false;
     }
 
@@ -103,6 +119,7 @@ bool OpenXrSession::createSession() {
     sci.next = &glBinding;
     sci.systemId = systemId_;
     XrResult r = xrCreateSession(instance_, &sci, &session_);
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::createSession result=%d", r);
     if (r != XR_SUCCESS) {
         lastError_ = "xrCreateSession failed";
         XR_LOGE("DDDVR/OpenXRSession", "xrCreateSession=%d", r);
@@ -138,6 +155,14 @@ bool OpenXrSession::end() {
 }
 
 void OpenXrSession::pollEvents() {
+    if (instance_ == XR_NULL_HANDLE) {
+        static bool loggedNoInstance = false;
+        if (!loggedNoInstance) {
+            XR_LOGE("DDDVR/OpenXRSession", "pollEvents skipped: no active XrInstance");
+            loggedNoInstance = true;
+        }
+        return;
+    }
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
