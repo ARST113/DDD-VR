@@ -1,4 +1,7 @@
 #pragma once
+
+#include "OpenXrPlatform.h"
+
 #include <string>
 #include "OpenXrPlatform.h"
 
@@ -8,7 +11,10 @@ public:
     bool createSession();
     bool createReferenceSpace();
     bool begin();
+    bool end();
     void pollEvents();
+    XrSessionState currentState() const { return state_; }
+
     bool runtimeAvailable() const { return runtimeAvailable_; }
     const std::string& lastError() const { return lastError_; }
     XrInstance instance() const { return instance_; }
@@ -22,6 +28,9 @@ private:
     std::string lastError_;
     bool initEgl();
     bool hasExtension(const char* name);
+
+    bool runtimeAvailable_ = false;
+    std::string lastError_;
     XrInstance instance_{XR_NULL_HANDLE};
     XrSystemId systemId_{XR_NULL_SYSTEM_ID};
     XrSession session_{XR_NULL_HANDLE};
