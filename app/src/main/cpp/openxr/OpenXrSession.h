@@ -1,8 +1,7 @@
 #pragma once
 
-#include <EGL/egl.h>
-#include <openxr/openxr.h>
-#include <openxr/openxr_platform.h>
+#include "OpenXrPlatform.h"
+
 #include <string>
 
 class OpenXrSession {
