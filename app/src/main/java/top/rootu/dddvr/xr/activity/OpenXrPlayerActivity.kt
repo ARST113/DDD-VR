@@ -21,6 +21,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     private lateinit var bridge: OpenXrBridge
     private var activeSurface: Surface? = null
     private var initialized = false
+    private var playerInitialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +36,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
 
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
+        playerInitialized = true
 
         playerManager.loadPlaylist(
             listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
@@ -74,6 +76,8 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
                 it.release()
             }
             runCatching { bridge.destroy() }
+        }
+        if (playerInitialized) {
             playbackSession.release()
         }
         super.onDestroy()

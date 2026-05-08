@@ -31,11 +31,15 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, j
     return reinterpret_cast<jlong>(app);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeStart(JNIEnv*, jobject, jlong handle) {
     auto* app = reinterpret_cast<OpenXrApp*>(handle);
-    if (!app) return;
-    if (!app->start()) XR_LOGE("DDDVR/OpenXR", "failed to start app");
+    if (!app) return JNI_FALSE;
+    if (!app->start()) {
+        XR_LOGE("DDDVR/OpenXR", "failed to start app");
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeResume(JNIEnv*, jobject, jlong handle) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->resume(); }

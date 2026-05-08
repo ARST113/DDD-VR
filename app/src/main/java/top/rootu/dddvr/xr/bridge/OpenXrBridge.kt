@@ -20,7 +20,12 @@ class OpenXrBridge(
             Log.e("DDDVR/OpenXR", "nativeCreate returned null handle")
             return false
         }
-        nativeStart(nativeHandle)
+        val started = nativeStart(nativeHandle)
+        if (!started) {
+            nativeDestroy(nativeHandle)
+            nativeHandle = 0L
+            return false
+        }
         return true
     }
 
@@ -69,7 +74,7 @@ class OpenXrBridge(
     }
 
     private external fun nativeCreate(context: Context, config: OpenXrPlaybackConfig): Long
-    private external fun nativeStart(handle: Long)
+    private external fun nativeStart(handle: Long): Boolean
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativeDestroy(handle: Long)
