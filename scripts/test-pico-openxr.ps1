@@ -1,163 +1,28 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$AdbPath,
-
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true)] [string]$AdbPath,
     [string]$ApkPath,
-
     [string]$VideoUrl = "https://example.com/video.mp4"
 )
-
 $ErrorActionPreference = "Stop"
-
-function Assert-True {
-    param(
-        [bool]$Condition,
-        [string]$Message
-    )
-    if (-not $Condition) {
-        throw $Message
-    }
-}
-
-function Invoke-Adb {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Args,
-        [switch]$AllowFailure
-    )
-
-    $output = & $AdbPath @Args 2>&1
-    $exitCode = $LASTEXITCODE
-    if (-not $AllowFailure -and $exitCode -ne 0) {
-        throw "adb command failed ($exitCode): adb $($Args -join ' ')`n$output"
-    }
-    if ($null -eq $output) {
-        return ""
-    }
-    return ($output -join "`n")
-}
-
-$artifactsDir = Join-Path $PSScriptRoot "..\artifacts"
-$artifactsDir = [System.IO.Path]::GetFullPath($artifactsDir)
-New-Item -Path $artifactsDir -ItemType Directory -Force | Out-Null
-
-$logPath = Join-Path $artifactsDir "pico-openxr-log.txt"
-$filteredPath = Join-Path $artifactsDir "pico-openxr-filtered.txt"
-$screenshotLocal = Join-Path $artifactsDir "pico-openxr.png"
-
-Write-Host "[1/13] Проверка adb.exe..."
-Assert-True -Condition (Test-Path -LiteralPath $AdbPath) -Message "adb.exe не найден: $AdbPath"
-
-Write-Host "[2/13] adb devices..."
-$devicesOutput = Invoke-Adb -Args @("devices")
-Write-Host $devicesOutput
-
-Write-Host "[3/13] Поиск подключенного устройства со статусом 'device'..."
-$deviceLines = $devicesOutput -split "`r?`n" | Where-Object {
-    $_ -match "\tdevice$"
-}
-Assert-True -Condition ($deviceLines.Count -gt 0) -Message "Не найдено устройство со статусом 'device'."
-
-Write-Host "[4/13] Установка APK..."
-Assert-True -Condition (Test-Path -LiteralPath $ApkPath) -Message "APK не найден: $ApkPath"
-$installOutput = Invoke-Adb -Args @("install", "-r", $ApkPath)
-Write-Host $installOutput
-
-Write-Host "[5/13] Очистка logcat..."
-Invoke-Adb -Args @("logcat", "-c") | Out-Null
-
-Write-Host "[6/13] Force-stop приложения..."
-Invoke-Adb -Args @("shell", "am", "force-stop", "top.rootu.dddvr") | Out-Null
-
-Write-Host "[7/13] Запуск OpenXrPlayerActivity explicit intent..."
-$startOutput = Invoke-Adb -Args @(
-    "shell", "am", "start", "-W",
-    "-a", "android.intent.action.VIEW",
-    "-d", $VideoUrl,
-    "-n", "top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity"
-)
-Write-Host $startOutput
-
-Write-Host "[8/13] Проверка active activity через dumpsys..."
-$activityDump = Invoke-Adb -Args @("shell", "dumpsys", "activity", "activities")
-$activityActive = ($activityDump -match "top\.rootu\.dddvr/.xr\.activity\.OpenXrPlayerActivity")
-
-Write-Host "[9/13] Ожидание 12 секунд для инициализации OpenXR..."
+function Invoke-Adb { param([string[]]$Args,[switch]$AllowFailure); $o=& $AdbPath @Args 2>&1; if(-not $AllowFailure -and $LASTEXITCODE -ne 0){ throw "adb failed: $($Args -join ' ')`n$o"}; if($null -eq $o){return ""}; return ($o -join "`n") }
+if([string]::IsNullOrWhiteSpace($ApkPath)){ $d=Join-Path $HOME "Downloads"; $c=Get-ChildItem $d -File -Recurse -ErrorAction SilentlyContinue | ? { $_.Name -like "*dddvr-debug-apk*" -or $_.Name -like "*DDD VR*" -or $_.Name -like "*DDD-VR*" -or $_.Name -like "*app-debug*.apk" } | sort LastWriteTime -desc; if($c){$ApkPath=$c[0].FullName}}
+if(-not (Test-Path $AdbPath)){ throw "adb.exe не найден: $AdbPath" }
+if(-not (Test-Path $ApkPath)){ throw "APK не найден: $ApkPath" }
+$art= [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\artifacts")); New-Item $art -ItemType Directory -Force|Out-Null
+Invoke-Adb @("devices") | Write-Host
+Invoke-Adb @("install","-r",$ApkPath)|Write-Host
+Invoke-Adb @("logcat","-c")|Out-Null
+Invoke-Adb @("shell","am","force-stop","top.rootu.dddvr")|Out-Null
+Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.VIEW","-d",$VideoUrl,"-n","top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity")|Write-Host
 Start-Sleep -Seconds 12
-
-Write-Host "[10/13] Снятие полного logcat..."
-$fullLog = Invoke-Adb -Args @("logcat", "-d")
-Set-Content -Path $logPath -Value $fullLog -Encoding UTF8
-
-Write-Host "[11/13] Сохранение filtered log..."
-$patterns = @(
-    "DDDVR/OpenXR",
-    "DDDVR/OpenXRLoader",
-    "DDDVR/OpenXRSession",
-    "DDDVR/OpenXRRenderer",
-    "AndroidRuntime",
-    "FATAL",
-    "Exception",
-    "UnsatisfiedLinkError"
-)
-$regex = ($patterns | ForEach-Object { [Regex]::Escape($_) }) -join "|"
-$filtered = $fullLog -split "`r?`n" | Where-Object { $_ -match $regex }
-Set-Content -Path $filteredPath -Value ($filtered -join "`n") -Encoding UTF8
-
-Write-Host "[12/13] Screencap + pull (best-effort)..."
-$screencapOk = $true
-try {
-    Invoke-Adb -Args @("shell", "screencap", "-p", "/sdcard/pico-openxr.png") | Out-Null
-    Invoke-Adb -Args @("pull", "/sdcard/pico-openxr.png", $screenshotLocal) | Out-Null
-} catch {
-    $screencapOk = $false
-    Write-Warning "Не удалось получить screenshot: $($_.Exception.Message)"
-}
-
-Write-Host "[13/13] PASS/FAIL проверка ключевых условий..."
-$hasLoaderResultTrue = $fullLog -match "OpenXrSession::initializeLoader result=true"
-$hasXrCreateInstanceSuccess = $fullLog -match "xrCreateInstance result=0"
-$hasXrGetSystemSuccess = $fullLog -match "xrGetSystem result=0"
-$hasNativeCreateNullHandle = $fullLog -match "nativeCreate returned null handle"
-$hasBridgeStartFailed = $fullLog -match "OpenXR bridge start failed"
-$hasFailedToInitializeApp = $fullLog -match "failed to initialize app"
-$hasInitializeLoaderFailed = $fullLog -match "xrInitializeLoaderKHR failed"
-$hasFboGoodSign = $fullLog -match "fbo status=0x8cd5"
-
-$conditions = [ordered]@{
-    "OpenXrPlayerActivity активна" = $activityActive
-    "Есть OpenXrSession::initializeLoader result=true" = $hasLoaderResultTrue
-    "Есть xrCreateInstance result=0" = $hasXrCreateInstanceSuccess
-    "Есть xrGetSystem result=0" = $hasXrGetSystemSuccess
-    "Нет nativeCreate returned null handle" = (-not $hasNativeCreateNullHandle)
-    "Нет OpenXR bridge start failed" = (-not $hasBridgeStartFailed)
-    "Нет failed to initialize app" = (-not $hasFailedToInitializeApp)
-    "Нет xrInitializeLoaderKHR failed" = (-not $hasInitializeLoaderFailed)
-}
-
-$allPass = $true
-foreach ($entry in $conditions.GetEnumerator()) {
-    $status = if ($entry.Value) { "PASS" } else { "FAIL" }
-    if (-not $entry.Value) { $allPass = $false }
-    Write-Host ("{0}: {1}" -f $entry.Key, $status)
-}
-
-if ($hasFboGoodSign) {
-    Write-Host "Признак рендера: обнаружен 'fbo status=0x8cd5' (good sign)."
-} else {
-    Write-Host "Признак рендера: 'fbo status=0x8cd5' не найден."
-}
-
-Write-Host "Artifacts:"
-Write-Host "- $logPath"
-Write-Host "- $filteredPath"
-if ($screencapOk -and (Test-Path -LiteralPath $screenshotLocal)) {
-    Write-Host "- $screenshotLocal"
-}
-
-if (-not $allPass) {
-    throw "Smoke-test завершился с FAIL. См. логи в artifacts/."
-}
-
+$full=Invoke-Adb @("logcat","-d"); Set-Content (Join-Path $art "pico-openxr-log.txt") $full -Encoding UTF8
+$patterns=@("DDDVR/OpenXR","DDDVR/OpenXRLoader","DDDVR/OpenXRSession","DDDVR/OpenXRRenderer","OpenXR-Loader","APxrRuntime","BD_ForwardLoader","XR_KHR_android_create_instance","setApplicationActivity","xrCreateInstance","xrGetSystem","xrGetOpenGLESGraphicsRequirementsKHR","xrCreateSession","xrCreateSwapchain","xrEnumerateSwapchainFormats","xrAcquireSwapchainImage","xrWaitSwapchainImage","xrReleaseSwapchainImage","xrWaitFrame","xrBeginFrame","xrLocateViews","xrEndFrame","fbo status","GL_FRAMEBUFFER","glErr","CURRENT_BLOCKER","AndroidRuntime","FATAL","Exception","UnsatisfiedLinkError")
+$re=($patterns|%{[Regex]::Escape($_)})-join "|"; ($full -split "`r?`n"|?{$_ -match $re}) -join "`n" | Set-Content (Join-Path $art "pico-openxr-filtered.txt") -Encoding UTF8
+Invoke-Adb @("shell","screencap","-p","/sdcard/pico-openxr.png") -AllowFailure|Out-Null; Invoke-Adb @("pull","/sdcard/pico-openxr.png",(Join-Path $art "pico-openxr.png")) -AllowFailure|Out-Null
+$checks=[ordered]@{
+"Loader init"=($full -match "initializeLoader result=true");"xrCreateInstance"=($full -match "xrCreateInstance result=0");"xrGetSystem"=($full -match "xrGetSystem result=0");"GL requirements"=($full -match "xrGetOpenGLESGraphicsRequirementsKHR result=0");"EGL context"=($full -match "EGL context current");"xrCreateSession"=($full -match "xrCreateSession result=0");"Reference space"=($full -match "xrCreateReferenceSpace result=0");"Swapchain"=($full -match "xrCreateSwapchain result=0");"FBO"=($full -match "fbo status=0x8cd5");"Frame loop"=(($full -match "xrWaitFrame=0") -and ($full -match "xrBeginFrame=0") -and ($full -match "xrEndFrame=0"))}
+$all=$true; foreach($k in $checks.Keys){$v=$checks[$k]; if(-not $v){$all=$false}; Write-Host "$k: $(if($v){'PASS'}else{'FAIL'})"}
+$blocker=($full -split "`r?`n"|?{$_ -match "CURRENT_BLOCKER"}|select -Last 1); Write-Host "CURRENT BLOCKER: $blocker"
+Invoke-Adb @("shell","am","force-stop","top.rootu.dddvr") -AllowFailure|Out-Null
+if(-not $all){ throw "Smoke-test FAIL" }
 Write-Host "Smoke-test PASS"

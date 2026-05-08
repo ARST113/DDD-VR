@@ -6,27 +6,26 @@
 
 class OpenXrSession {
 public:
-    bool initialize();
+    bool initializeLoaderAndInstance();
+    bool prepareGraphics();
     bool createSession();
     bool createReferenceSpace();
     bool begin();
     bool end();
     void pollEvents();
+    void shutdown();
     XrSessionState currentState() const { return state_; }
 
     bool runtimeAvailable() const { return runtimeAvailable_; }
     bool hasInstance() const { return instance_ != XR_NULL_HANDLE; }
     bool isInitialized() const { return instance_ != XR_NULL_HANDLE && systemId_ != XR_NULL_SYSTEM_ID; }
     const std::string& lastError() const { return lastError_; }
-    XrInstance instance() const { return instance_; }
-    XrSystemId systemId() const { return systemId_; }
     XrSession session() const { return session_; }
     XrSpace appSpace() const { return appSpace_; }
     uint32_t recommendedWidth() const { return recWidth_; }
     uint32_t recommendedHeight() const { return recHeight_; }
 
 private:
-    bool initEgl();
     bool hasExtension(const char* name);
 
     bool runtimeAvailable_ = false;

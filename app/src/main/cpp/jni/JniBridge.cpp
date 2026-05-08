@@ -26,11 +26,7 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, j
     }
 
     auto* app = new OpenXrApp();
-    if (!app->initialize()) {
-        XR_LOGE("DDDVR/OpenXR", "failed to initialize app reason=%s", app->lastError().c_str());
-        delete app;
-        return 0;
-    }
+    if (!app->initialize()) { delete app; return 0; }
     return reinterpret_cast<jlong>(app);
 }
 
