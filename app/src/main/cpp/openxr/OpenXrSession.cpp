@@ -1,6 +1,6 @@
 #include "OpenXrSession.h"
 #include "../util/XrLog.h"
-#if HAS_OPENXR
+
 #include <cstring>
 #include <vector>
 #include <openxr/openxr_platform.h>
@@ -26,10 +26,10 @@ bool OpenXrSession::initEgl() {
     if (eglContext_ == EGL_NO_CONTEXT) return false;
     return eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_) == EGL_TRUE;
 }
-#endif
+
 
 bool OpenXrSession::initialize() {
-#if HAS_OPENXR
+
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME)) { lastError_ = "XR_KHR_opengl_es_enable missing"; return false; }
     XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
     std::strcpy(ci.applicationInfo.applicationName, "DDD-VR");
@@ -48,14 +48,11 @@ bool OpenXrSession::initialize() {
     if (!initEgl()) { lastError_ = "EGL init failed"; return false; }
     runtimeAvailable_ = true;
     return true;
-#else
-    lastError_ = "OpenXR unavailable";
-    return false;
-#endif
+
 }
 
 bool OpenXrSession::createSession(){
-#if HAS_OPENXR
+
     XrGraphicsBindingOpenGLESAndroidKHR glBinding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     glBinding.display = eglDisplay_;
     glBinding.config = eglConfig_;
@@ -63,30 +60,24 @@ bool OpenXrSession::createSession(){
     XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO}; sci.next=&glBinding; sci.systemId=systemId_;
     XrResult r = xrCreateSession(instance_, &sci, &session_); if (r != XR_SUCCESS) { lastError_="xrCreateSession failed"; XR_LOGE("DDDVR/OpenXRSession","xrCreateSession=%d",r); return false; }
     return true;
-#else
-    return false;
-#endif
+
 }
 
 bool OpenXrSession::createReferenceSpace(){
-#if HAS_OPENXR
+
     XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType=XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w=1.f;
     XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); if (r != XR_SUCCESS) { lastError_="xrCreateReferenceSpace failed"; return false; }
     return true;
-#else
-    return false;
-#endif
+
 }
 bool OpenXrSession::begin(){
-#if HAS_OPENXR
+
     XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     return xrBeginSession(session_, &bi) == XR_SUCCESS;
-#else
-    return false;
-#endif
+
 }
 void OpenXrSession::pollEvents(){
-#if HAS_OPENXR
+
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
@@ -95,5 +86,5 @@ void OpenXrSession::pollEvents(){
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
-#endif
+
 }
