@@ -32,7 +32,10 @@ function Invoke-Adb {
     if (-not $AllowFailure -and $exitCode -ne 0) {
         throw "adb command failed ($exitCode): adb $($Args -join ' ')`n$output"
     }
-    return [string]::Join("`n", $output)
+    if ($null -eq $output) {
+        return ""
+    }
+    return ($output -join "`n")
 }
 
 $artifactsDir = Join-Path $PSScriptRoot "..\artifacts"
@@ -113,19 +116,24 @@ try {
 }
 
 Write-Host "[13/13] PASS/FAIL проверка ключевых условий..."
-$hasOpenXrUnavailable = $fullLog -match "OpenXR unavailable"
-$hasOpenXrLoader = $fullLog -match "DDDVR/OpenXRLoader"
-$hasXrInitializeLoader = $fullLog -match "xrInitializeLoaderKHR"
-$hasXrCreateInstance = $fullLog -match "xrCreateInstance"
-$hasRealXrError = $fullLog -match "\bxr[A-Za-z0-9_]+\b.*(error|failed|XR_ERROR)"
+$hasLoaderResultTrue = $fullLog -match "OpenXrSession::initializeLoader result=true"
+$hasXrCreateInstanceSuccess = $fullLog -match "xrCreateInstance result=0"
+$hasXrGetSystemSuccess = $fullLog -match "xrGetSystem result=0"
+$hasNativeCreateNullHandle = $fullLog -match "nativeCreate returned null handle"
+$hasBridgeStartFailed = $fullLog -match "OpenXR bridge start failed"
+$hasFailedToInitializeApp = $fullLog -match "failed to initialize app"
+$hasInitializeLoaderFailed = $fullLog -match "xrInitializeLoaderKHR failed"
 $hasFboGoodSign = $fullLog -match "fbo status=0x8cd5"
 
 $conditions = [ordered]@{
     "OpenXrPlayerActivity активна" = $activityActive
-    "Нет 'OpenXR unavailable'" = (-not $hasOpenXrUnavailable)
-    "Есть OpenXRLoader" = $hasOpenXrLoader
-    "Есть xrInitializeLoaderKHR" = $hasXrInitializeLoader
-    "Есть xrCreateInstance ИЛИ реальная xr* ошибка" = ($hasXrCreateInstance -or $hasRealXrError)
+    "Есть OpenXrSession::initializeLoader result=true" = $hasLoaderResultTrue
+    "Есть xrCreateInstance result=0" = $hasXrCreateInstanceSuccess
+    "Есть xrGetSystem result=0" = $hasXrGetSystemSuccess
+    "Нет nativeCreate returned null handle" = (-not $hasNativeCreateNullHandle)
+    "Нет OpenXR bridge start failed" = (-not $hasBridgeStartFailed)
+    "Нет failed to initialize app" = (-not $hasFailedToInitializeApp)
+    "Нет xrInitializeLoaderKHR failed" = (-not $hasInitializeLoaderFailed)
 }
 
 $allPass = $true

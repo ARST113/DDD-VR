@@ -7,6 +7,7 @@ namespace dddvr::openxr {
 static JavaVM* g_javaVm = nullptr;
 static jobject g_applicationContext = nullptr;
 static const char* g_loaderStatus = "not_initialized";
+static jobject g_applicationActivity = nullptr;
 
 void setJavaVm(JavaVM* vm) {
     g_javaVm = vm;
@@ -36,6 +37,24 @@ bool setApplicationContext(JNIEnv* env, jobject context) {
 
 bool hasJavaVm() { return g_javaVm != nullptr; }
 bool hasApplicationContext() { return g_applicationContext != nullptr; }
+
+bool setApplicationActivity(JNIEnv* env, jobject activity) {
+    if (env == nullptr || activity == nullptr) {
+        XR_LOGE("DDDVR/OpenXRLoader", "setApplicationActivity failed env=%p activity=%p", env, activity);
+        return false;
+    }
+    if (g_applicationActivity != nullptr) {
+        env->DeleteGlobalRef(g_applicationActivity);
+        g_applicationActivity = nullptr;
+    }
+    g_applicationActivity = env->NewGlobalRef(activity);
+    XR_LOGI("DDDVR/OpenXRLoader", "setApplicationActivity success activity=%p", g_applicationActivity);
+    return g_applicationActivity != nullptr;
+}
+
+bool hasApplicationActivity() { return g_applicationActivity != nullptr; }
+JavaVM* javaVm() { return g_javaVm; }
+jobject applicationActivity() { return g_applicationActivity; }
 
 XrResult initializeLoader() {
     XR_LOGI("DDDVR/OpenXRLoader", "initializeLoader enter vm=%p ctx=%p", g_javaVm, g_applicationContext);

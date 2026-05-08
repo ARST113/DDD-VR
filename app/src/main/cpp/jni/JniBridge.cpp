@@ -10,7 +10,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, jobject context, jobject) {
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, jobject activity, jobject appContext, jobject) {
     JavaVM* vm = nullptr;
     if (env != nullptr && env->GetJavaVM(&vm) == JNI_OK && vm != nullptr) {
         dddvr::openxr::setJavaVm(vm);
@@ -18,8 +18,11 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, j
         XR_LOGE("DDDVR/OpenXRLoader", "nativeCreate failed to get JavaVM");
     }
 
-    if (!dddvr::openxr::setApplicationContext(env, context)) {
+    if (!dddvr::openxr::setApplicationContext(env, appContext)) {
         XR_LOGE("DDDVR/OpenXRLoader", "nativeCreate failed to set application context");
+    }
+    if (!dddvr::openxr::setApplicationActivity(env, activity)) {
+        XR_LOGE("DDDVR/OpenXRLoader", "nativeCreate failed to set application activity");
     }
 
     auto* app = new OpenXrApp();
@@ -31,11 +34,15 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, j
     return reinterpret_cast<jlong>(app);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeStart(JNIEnv*, jobject, jlong handle) {
     auto* app = reinterpret_cast<OpenXrApp*>(handle);
-    if (!app) return;
-    if (!app->start()) XR_LOGE("DDDVR/OpenXR", "failed to start app");
+    if (!app) return JNI_FALSE;
+    if (!app->start()) {
+        XR_LOGE("DDDVR/OpenXR", "failed to start app");
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeResume(JNIEnv*, jobject, jlong handle) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->resume(); }
