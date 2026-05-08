@@ -22,6 +22,20 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK/NDK/CMake packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973"
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -29,8 +43,17 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Run unit tests
+        run: ./gradlew test --stacktrace
+
+      - name: Verify OpenXR native lib in APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          test -n "$APK"
+          unzip -l "$APK" | grep "libdddvr_openxr.so"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: dddplayer-debug-apk
+          name: dddvr-debug-apk
           path: app/build/outputs/apk/debug/*.apk
