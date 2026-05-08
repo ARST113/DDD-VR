@@ -7,6 +7,14 @@
 bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init deferred to render thread"); return true; }
 
 bool OpenXrApp::start() {
+    if (!initialized_) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: not initialized");
+        return false;
+    }
+    if (!session_.hasInstance()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: invalid XrInstance");
+        return false;
+    }
     if (running_) return true;
     running_ = true; sessionRunning_ = false; initDone_ = false; initOk_ = false; initialized_ = false;
     thread_ = std::thread(&OpenXrApp::loop, this);
