@@ -33,3 +33,9 @@ jobs:
 
       - name: Unit tests
         run: ./gradlew test --stacktrace
+
+      - name: Verify OpenXR native lib in APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          test -n "$APK"
+          unzip -l "$APK" | grep "libdddvr_openxr.so"
