@@ -1,12 +1,6 @@
 #include "OpenXrApp.h"
+#include "OpenXrPlatform.h"
 #include "../util/XrLog.h"
-#if __has_include(<openxr/openxr.h>)
-#include <openxr/openxr.h>
-#define HAS_OPENXR 1
-#else
-#define HAS_OPENXR 0
-#endif
-#include <GLES3/gl3.h>
 #include <chrono>
 
 bool OpenXrApp::initialize(){
@@ -14,9 +8,7 @@ bool OpenXrApp::initialize(){
     if(!session_.createSession()) return false;
     if(!session_.createReferenceSpace()) return false;
     renderer_.initialize();
-#if HAS_OPENXR
     swapchain_.create(session_.session(), (int32_t)session_.recommendedWidth(), (int32_t)session_.recommendedHeight());
-#endif
     return true;
 }
 
@@ -26,7 +18,6 @@ void OpenXrApp::resume(){ if(!running_){ running_=true; if(!thread_.joinable()) 
 void OpenXrApp::destroy(){ running_=false; if(thread_.joinable()) thread_.join(); }
 
 void OpenXrApp::loop(){
-#if HAS_OPENXR
     std::vector<XrView> views(2, {XR_TYPE_VIEW});
     GLuint fbo=0; glGenFramebuffers(1,&fbo);
     while(running_){
@@ -74,7 +65,4 @@ void OpenXrApp::loop(){
         auto er=xrEndFrame(session_.session(), &ei); XR_LOGI("DDDVR/OpenXRRenderer","xrEndFrame=%d",er);
         swapchain_.releaseImage();
     }
-#else
-    while(running_){ std::this_thread::sleep_for(std::chrono::milliseconds(16)); }
-#endif
 }
