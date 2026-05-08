@@ -3,6 +3,7 @@
 #include "../util/XrLog.h"
 
 #include <cstring>
+#include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <vector>
 

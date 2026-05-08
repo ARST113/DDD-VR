@@ -38,7 +38,13 @@ add_library(dddvr_openxr SHARED
 )
 
 target_compile_features(dddvr_openxr PRIVATE cxx_std_17)
-target_compile_definitions(dddvr_openxr PRIVATE DDDVR_HAS_OPENXR=1)
+target_compile_definitions(
+    dddvr_openxr
+    PRIVATE
+        DDDVR_HAS_OPENXR=1
+        XR_USE_PLATFORM_ANDROID
+        XR_USE_GRAPHICS_API_OPENGL_ES
+)
 target_include_directories(dddvr_openxr PRIVATE "${OPENXR_INCLUDE_DIR}")
 
 target_link_libraries(dddvr_openxr
