@@ -46,8 +46,7 @@ void OpenXrApp::loop(){
             }
         }
         if (sessionRunning_ && state == XR_SESSION_STATE_STOPPING) {
-            const XrResult endResult = xrEndSession(session_.session());
-            XR_LOGI("DDDVR/OpenXRSession", "xrEndSession=%d", endResult);
+            session_.end();
             sessionRunning_ = false;
             continue;
         }

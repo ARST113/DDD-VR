@@ -92,7 +92,15 @@ bool OpenXrSession::createReferenceSpace(){
 }
 bool OpenXrSession::begin(){
     XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-    return xrBeginSession(session_, &bi) == XR_SUCCESS;
+    const XrResult result = xrBeginSession(session_, &bi);
+    XR_LOGI("DDDVR/OpenXRSession", "xrBeginSession=%d", result);
+    return result == XR_SUCCESS;
+}
+
+bool OpenXrSession::end(){
+    const XrResult result = xrEndSession(session_);
+    XR_LOGI("DDDVR/OpenXRSession", "xrEndSession=%d", result);
+    return result == XR_SUCCESS;
 }
 void OpenXrSession::pollEvents(){
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};

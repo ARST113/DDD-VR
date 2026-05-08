@@ -8,6 +8,7 @@ public:
     bool createSession();
     bool createReferenceSpace();
     bool begin();
+    bool end();
     void pollEvents();
     bool runtimeAvailable() const { return runtimeAvailable_; }
     const std::string& lastError() const { return lastError_; }

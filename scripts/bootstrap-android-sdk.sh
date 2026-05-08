@@ -112,8 +112,9 @@ if [ -z "$SDKMANAGER" ]; then
   mkdir -p /tmp/dddvr-android-sdk-tools
   cd /tmp/dddvr-android-sdk-tools
 
-  # Keep explicit versions first. 'latest' URLs can break or be blocked in some sandboxes.
+  # Prefer project-provided GitHub release cache first, then official Google mirrors.
   CMDLINE_TOOLS_URLS=(
+    "https://github.com/ARST113/DDD-VR/releases/download/sdk-cache-v1/commandlinetools-linux-14742923_latest.zip"
     "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
     "https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip"
     "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
@@ -138,7 +139,7 @@ if [ -z "$SDKMANAGER" ]; then
     cat >&2 <<MSG
 
 [DDD-VR bootstrap][ERROR]
-Failed to download Android command line tools from dl.google.com.
+Failed to download Android command line tools from GitHub Release and dl.google.com.
 
 This is an environment/network limitation, not a DDD-VR source-code error.
 
