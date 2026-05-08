@@ -14,16 +14,28 @@ class OpenXrBridge(
     private val appContext = context.applicationContext
     private var nativeHandle: Long = 0L
 
-    fun start() {
+    fun start(): Boolean {
         nativeHandle = nativeCreate(appContext, config)
+        if (nativeHandle == 0L) {
+            Log.e("DDDVR/OpenXR", "nativeCreate returned null handle")
+            return false
+        }
         nativeStart(nativeHandle)
+        return true
     }
 
-    fun onResume() = nativeResume(nativeHandle)
+    fun onResume() {
+        if (nativeHandle == 0L) return
+        nativeResume(nativeHandle)
+    }
 
-    fun onPause() = nativePause(nativeHandle)
+    fun onPause() {
+        if (nativeHandle == 0L) return
+        nativePause(nativeHandle)
+    }
 
     fun destroy() {
+        if (nativeHandle == 0L) return
         nativeDestroy(nativeHandle)
         nativeHandle = 0L
     }

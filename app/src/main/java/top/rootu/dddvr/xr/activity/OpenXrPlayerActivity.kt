@@ -46,12 +46,14 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         OpenXrDebugOverlay.logStartup(config)
 
         bridge = OpenXrBridge(this, this, config)
-        runCatching { bridge.start() }
-            .onFailure {
-                Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it)
-                finish()
-                return
-            }
+        val startOk = runCatching { bridge.start() }
+            .onFailure { Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it) }
+            .getOrDefault(false)
+        if (!startOk) {
+            Log.e("DDDVR/OpenXR", "OpenXR bridge start failed (null/invalid native handle)")
+            finish()
+            return
+        }
         initialized = true
     }
 
