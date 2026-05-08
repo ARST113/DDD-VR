@@ -1,4 +1,5 @@
 #include "OpenXrSession.h"
+#include "OpenXrLoader.h"
 
 #include "../util/XrLog.h"
 
@@ -52,20 +53,50 @@ bool OpenXrSession::initEgl() {
 }
 
 bool OpenXrSession::initialize() {
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initialize enter");
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::calling initializeLoader");
+    const XrResult loaderResult = dddvr::openxr::initializeLoader();
+    const bool loaderOk = loaderResult == XR_SUCCESS;
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initializeLoader result=%s code=%d", loaderOk ? "true" : "false", loaderResult);
+    if (!loaderOk) {
+        lastError_ = "xrInitializeLoaderKHR failed: " + std::to_string(loaderResult);
+        return false;
+    }
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME)) {
         lastError_ = "XR_KHR_opengl_es_enable missing";
         return false;
     }
+    if (!hasExtension(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME)) {
+        lastError_ = "XR_KHR_android_create_instance missing";
+        return false;
+    }
+    std::vector<const char*> enabledExtensions = {
+        XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
+        XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME
+    };
+    for (const char* ext : enabledExtensions) {
+        XR_LOGI("DDDVR/OpenXRSession", "enabling extension %s", ext);
+    }
+
+    XrInstanceCreateInfoAndroidKHR androidInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
+    androidInfo.applicationVM = dddvr::openxr::javaVm();
+    androidInfo.applicationActivity = dddvr::openxr::applicationActivity();
+    XR_LOGI("DDDVR/OpenXRSession", "androidCreateInfo vm=%p activity=%p", androidInfo.applicationVM, androidInfo.applicationActivity);
+    if (androidInfo.applicationVM == nullptr || androidInfo.applicationActivity == nullptr) {
+        lastError_ = "Android create instance info missing VM or Activity";
+        return false;
+    }
+
     XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
+    ci.next = &androidInfo;
     std::strcpy(ci.applicationInfo.applicationName, "DDD-VR");
     ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-    const char* exts[] = {XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME};
-    ci.enabledExtensionCount = 1;
-    ci.enabledExtensionNames = exts;
+    ci.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
+    ci.enabledExtensionNames = enabledExtensions.data();
     XrResult r = xrCreateInstance(&ci, &instance_);
     XR_LOGI("DDDVR/OpenXRSession", "xrCreateInstance result=%d", r);
     if (r != XR_SUCCESS) {
-        lastError_ = "xrCreateInstance failed";
+        lastError_ = "xrCreateInstance failed: " + std::to_string(r);
         return false;
     }
     XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
@@ -73,7 +104,7 @@ bool OpenXrSession::initialize() {
     r = xrGetSystem(instance_, &sgi, &systemId_);
     XR_LOGI("DDDVR/OpenXRSession", "xrGetSystem result=%d", r);
     if (r != XR_SUCCESS) {
-        lastError_ = "xrGetSystem failed";
+        lastError_ = "xrGetSystem failed: " + std::to_string(r);
         return false;
     }
 
@@ -103,6 +134,7 @@ bool OpenXrSession::createSession() {
     sci.next = &glBinding;
     sci.systemId = systemId_;
     XrResult r = xrCreateSession(instance_, &sci, &session_);
+    XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::createSession result=%d", r);
     if (r != XR_SUCCESS) {
         lastError_ = "xrCreateSession failed";
         XR_LOGE("DDDVR/OpenXRSession", "xrCreateSession=%d", r);
@@ -138,6 +170,14 @@ bool OpenXrSession::end() {
 }
 
 void OpenXrSession::pollEvents() {
+    if (instance_ == XR_NULL_HANDLE) {
+        static bool loggedNoInstance = false;
+        if (!loggedNoInstance) {
+            XR_LOGE("DDDVR/OpenXRSession", "pollEvents skipped: no active XrInstance");
+            loggedNoInstance = true;
+        }
+        return;
+    }
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
