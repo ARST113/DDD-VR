@@ -8,16 +8,40 @@
 #include <vector>
 
 bool OpenXrApp::initialize() {
-    if (!session_.initialize()) return false;
-    if (!session_.createSession()) return false;
-    if (!session_.createReferenceSpace()) return false;
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp::initialize enter");
+    initialized_ = false;
+    if (!session_.initialize()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::initialize result=false reason=%s", session_.lastError().c_str());
+        return false;
+    }
+    if (!session_.createSession()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::initialize result=false reason=%s", session_.lastError().c_str());
+        return false;
+    }
+    if (!session_.createReferenceSpace()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::initialize result=false reason=%s", session_.lastError().c_str());
+        return false;
+    }
     renderer_.initialize();
-    swapchain_.create(session_.session(), static_cast<int32_t>(session_.recommendedWidth()), static_cast<int32_t>(session_.recommendedHeight()));
+    if (!swapchain_.create(session_.session(), static_cast<int32_t>(session_.recommendedWidth()), static_cast<int32_t>(session_.recommendedHeight()))) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::initialize result=false reason=swapchain create failed");
+        return false;
+    }
+    initialized_ = true;
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp::initialize result=true");
     XR_LOGI("DDDVR/OpenXRBuild", "built with OpenXR");
     return true;
 }
 
 bool OpenXrApp::start() {
+    if (!initialized_) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: not initialized");
+        return false;
+    }
+    if (!session_.hasInstance()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: invalid XrInstance");
+        return false;
+    }
     if (running_) return true;
     running_ = true;
     sessionRunning_ = false;
@@ -43,11 +67,27 @@ void OpenXrApp::resume() {
 void OpenXrApp::destroy() { stopAndJoinThread(); }
 
 void OpenXrApp::loop() {
+    if (!initialized_ || !session_.hasInstance()) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop aborted: invalid initialization or instance");
+        running_ = false;
+        return;
+    }
+
     std::vector<XrView> views(2, {XR_TYPE_VIEW});
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
+    bool loggedInvalidLoopState = false;
 
     while (running_) {
+        if (!initialized_ || !session_.hasInstance()) {
+            if (!loggedInvalidLoopState) {
+                XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop stopping: session instance invalid");
+                loggedInvalidLoopState = true;
+            }
+            running_ = false;
+            break;
+        }
+
         session_.pollEvents();
         const XrSessionState state = session_.currentState();
 
