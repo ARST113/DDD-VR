@@ -1,7 +1,6 @@
 #include "OpenXrSwapchain.h"
 
 #include "../util/XrLog.h"
-
 bool OpenXrSwapchain::create(XrSession session, int32_t w, int32_t h) {
     width_ = w;
     height_ = h;

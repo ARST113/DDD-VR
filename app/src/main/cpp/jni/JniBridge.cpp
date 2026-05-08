@@ -1,10 +1,19 @@
 #include <jni.h>
 #include <memory>
 #include "../openxr/OpenXrApp.h"
+#include "../openxr/OpenXrLoader.h"
 #include "../util/XrLog.h"
 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+    dddvr::openxr::setJavaVm(vm);
+    return JNI_VERSION_1_6;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv*, jobject, jobject, jobject) {
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeCreate(JNIEnv* env, jobject, jobject context, jobject) {
+    if (!dddvr::openxr::setApplicationContext(env, context)) {
+        XR_LOGE("DDDVR/OpenXRLoader", "Failed to set application context");
+    }
     auto* app = new OpenXrApp();
     if (!app->initialize()) {
         XR_LOGE("DDDVR/OpenXR", "OpenXR runtime unavailable reason=%s", app->lastError().c_str());

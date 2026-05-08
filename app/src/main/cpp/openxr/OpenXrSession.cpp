@@ -1,31 +1,12 @@
 #include "OpenXrSession.h"
-
+#include "OpenXrLoader.h"
 #include "../util/XrLog.h"
-
 #include <cstring>
 #include <vector>
 
-namespace {
-const char* sessionStateToString(XrSessionState state) {
-    switch (state) {
-        case XR_SESSION_STATE_UNKNOWN: return "UNKNOWN";
-        case XR_SESSION_STATE_IDLE: return "IDLE";
-        case XR_SESSION_STATE_READY: return "READY";
-        case XR_SESSION_STATE_SYNCHRONIZED: return "SYNCHRONIZED";
-        case XR_SESSION_STATE_VISIBLE: return "VISIBLE";
-        case XR_SESSION_STATE_FOCUSED: return "FOCUSED";
-        case XR_SESSION_STATE_STOPPING: return "STOPPING";
-        case XR_SESSION_STATE_LOSS_PENDING: return "LOSS_PENDING";
-        case XR_SESSION_STATE_EXITING: return "EXITING";
-        case XR_SESSION_STATE_MAX_ENUM: return "MAX_ENUM";
-    }
-    return "UNRECOGNIZED";
-}
-}
-
 bool OpenXrSession::hasExtension(const char* name) {
-    uint32_t count = 0;
-    xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr);
+    uint32_t count=0; xrEnumerateInstanceExtensionProperties(nullptr,0,&count,nullptr);
+    XR_LOGI("DDDVR/OpenXRSession", "extension count=%u", count);
     std::vector<XrExtensionProperties> exts(count, {XR_TYPE_EXTENSION_PROPERTIES});
     xrEnumerateInstanceExtensionProperties(nullptr, count, &count, exts.data());
     for (auto& e : exts) {
@@ -52,10 +33,17 @@ bool OpenXrSession::initEgl() {
 }
 
 bool OpenXrSession::initialize() {
-    if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME)) {
-        lastError_ = "XR_KHR_opengl_es_enable missing";
+    if (!dddvr::openxr::initializeLoader()) {
+        lastError_ = "xrInitializeLoaderKHR failed";
         return false;
     }
+    const bool hasGles = hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME);
+    const bool hasVulkan = hasExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+    const bool hasVulkan2 = hasExtension(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
+    XR_LOGI("DDDVR/OpenXRSession", "hasGLES=%d", hasGles ? 1 : 0);
+    XR_LOGI("DDDVR/OpenXRSession", "hasVulkan=%d", hasVulkan ? 1 : 0);
+    XR_LOGI("DDDVR/OpenXRSession", "hasVulkan2=%d", hasVulkan2 ? 1 : 0);
+    if (!hasGles) { lastError_ = "XR_KHR_opengl_es_enable missing"; return false; }
     XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
     std::strcpy(ci.applicationInfo.applicationName, "DDD-VR");
     ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
@@ -94,7 +82,7 @@ bool OpenXrSession::initialize() {
     return true;
 }
 
-bool OpenXrSession::createSession() {
+bool OpenXrSession::createSession(){
     XrGraphicsBindingOpenGLESAndroidKHR glBinding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     glBinding.display = eglDisplay_;
     glBinding.config = eglConfig_;
@@ -111,33 +99,16 @@ bool OpenXrSession::createSession() {
     return true;
 }
 
-bool OpenXrSession::createReferenceSpace() {
-    XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-    rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-    rs.poseInReferenceSpace.orientation.w = 1.f;
-    XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_);
-    if (r != XR_SUCCESS) {
-        lastError_ = "xrCreateReferenceSpace failed";
-        return false;
-    }
+bool OpenXrSession::createReferenceSpace(){
+    XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType=XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w=1.f;
+    XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); if (r != XR_SUCCESS) { lastError_="xrCreateReferenceSpace failed"; return false; }
     return true;
 }
-
-bool OpenXrSession::begin() {
-    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
-    bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-    XrResult r = xrBeginSession(session_, &bi);
-    XR_LOGI("DDDVR/OpenXRSession", "xrBeginSession result=%d", r);
-    return r == XR_SUCCESS;
+bool OpenXrSession::begin(){
+    XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    return xrBeginSession(session_, &bi) == XR_SUCCESS;
 }
-
-bool OpenXrSession::end() {
-    XrResult r = xrEndSession(session_);
-    XR_LOGI("DDDVR/OpenXRSession", "xrEndSession result=%d", r);
-    return r == XR_SUCCESS;
-}
-
-void OpenXrSession::pollEvents() {
+void OpenXrSession::pollEvents(){
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {

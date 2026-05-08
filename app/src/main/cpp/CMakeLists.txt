@@ -32,6 +32,7 @@ add_library(dddvr_openxr SHARED
     openxr/OpenXrSwapchain.cpp
     openxr/OpenXrRenderer.cpp
     openxr/OpenXrInput.cpp
+    openxr/OpenXrLoader.cpp
     gl/GlProgram.cpp
     gl/CinemaScreenRenderer.cpp
     video/ExternalOesVideoTexture.cpp
@@ -45,7 +46,6 @@ target_compile_definitions(
         XR_USE_PLATFORM_ANDROID
         XR_USE_GRAPHICS_API_OPENGL_ES
 )
-target_include_directories(dddvr_openxr PRIVATE "${OPENXR_INCLUDE_DIR}")
 
 target_link_libraries(dddvr_openxr
     android

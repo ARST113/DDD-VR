@@ -1,7 +1,5 @@
 #pragma once
-
 #include "OpenXrPlatform.h"
-
 #include <vector>
 
 class OpenXrSwapchain {
@@ -13,7 +11,6 @@ public:
     int32_t width() const { return width_; }
     int32_t height() const { return height_; }
     GLuint activeColorTexture() const;
-
 private:
     XrSwapchain swapchain_{XR_NULL_HANDLE};
     std::vector<XrSwapchainImageOpenGLESKHR> images_;

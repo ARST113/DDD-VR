@@ -3,6 +3,7 @@
 #include "OpenXrPlatform.h"
 
 #include <string>
+#include "OpenXrPlatform.h"
 
 class OpenXrSession {
 public:
@@ -22,8 +23,9 @@ public:
     XrSpace appSpace() const { return appSpace_; }
     uint32_t recommendedWidth() const { return recWidth_; }
     uint32_t recommendedHeight() const { return recHeight_; }
-
 private:
+    bool runtimeAvailable_ = false;
+    std::string lastError_;
     bool initEgl();
     bool hasExtension(const char* name);
 
