@@ -1,6 +1,5 @@
 #include "OpenXrSwapchain.h"
 #include "../util/XrLog.h"
-#if HAS_OPENXR
 bool OpenXrSwapchain::create(XrSession session, int32_t w, int32_t h) {
     width_ = w; height_ = h;
     XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -35,4 +34,3 @@ GLuint OpenXrSwapchain::activeColorTexture() const {
     if (activeIndex_ >= images_.size()) return 0;
     return images_[activeIndex_].image;
 }
-#endif
