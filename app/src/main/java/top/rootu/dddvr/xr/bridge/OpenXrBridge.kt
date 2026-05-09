@@ -1,5 +1,6 @@
 package top.rootu.dddvr.xr.bridge
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import android.view.Surface
@@ -7,23 +8,39 @@ import top.rootu.dddvr.xr.input.OpenXrInputMapper
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
 
 class OpenXrBridge(
-    context: Context,
+    private val activity: Activity,
     private val callbacks: Callbacks,
     private val config: OpenXrPlaybackConfig
 ) {
-    private val appContext = context.applicationContext
     private var nativeHandle: Long = 0L
 
-    fun start() {
-        nativeHandle = nativeCreate(appContext, config)
-        nativeStart(nativeHandle)
+    fun start(): Boolean {
+        nativeHandle = nativeCreate(activity, activity.applicationContext, config)
+        if (nativeHandle == 0L) {
+            Log.e("DDDVR/OpenXR", "nativeCreate returned null handle")
+            return false
+        }
+        val started = nativeStart(nativeHandle)
+        if (!started) {
+            nativeDestroy(nativeHandle)
+            nativeHandle = 0L
+            return false
+        }
+        return true
     }
 
-    fun onResume() = nativeResume(nativeHandle)
+    fun onResume() {
+        if (nativeHandle == 0L) return
+        nativeResume(nativeHandle)
+    }
 
-    fun onPause() = nativePause(nativeHandle)
+    fun onPause() {
+        if (nativeHandle == 0L) return
+        nativePause(nativeHandle)
+    }
 
     fun destroy() {
+        if (nativeHandle == 0L) return
         nativeDestroy(nativeHandle)
         nativeHandle = 0L
     }
@@ -56,8 +73,8 @@ class OpenXrBridge(
         fun onExit()
     }
 
-    private external fun nativeCreate(context: Context, config: OpenXrPlaybackConfig): Long
-    private external fun nativeStart(handle: Long)
+    private external fun nativeCreate(activity: Activity, appContext: Context, config: OpenXrPlaybackConfig): Long
+    private external fun nativeStart(handle: Long): Boolean
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativeDestroy(handle: Long)
