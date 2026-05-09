@@ -35,6 +35,7 @@ private:
     std::atomic<bool> initialized_{false};
     std::atomic<bool> running_{false};
     std::atomic<bool> sessionRunning_{false};
+    std::atomic<bool> pendingStart_{false};
     std::mutex initMutex_;
     std::condition_variable initCv_;
     bool initDone_ = false;

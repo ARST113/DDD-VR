@@ -10,6 +10,7 @@ bool OpenXrSession::initializeLoaderAndInstance() {
     XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initialize enter");
     const XrResult loaderResult = dddvr::openxr::initializeLoader();
     XR_LOGI("DDDVR/OpenXRSession", "OpenXrSession::initializeLoader result=%s code=%d", loaderResult == XR_SUCCESS ? "true" : "false", loaderResult);
+    XR_LOGI("DDDVR/OpenXRSession", "xrInitializeLoaderKHR result=%d", loaderResult);
     if (loaderResult != XR_SUCCESS) { lastError_ = "xrInitializeLoaderKHR failed: " + std::to_string(loaderResult); return false; }
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME) || !hasExtension(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME)) { lastError_ = "required extension missing"; return false; }
     std::vector<const char*> enabled{XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME, XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};

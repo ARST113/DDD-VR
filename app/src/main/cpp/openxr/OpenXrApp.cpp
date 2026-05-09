@@ -7,16 +7,14 @@
 bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init deferred to render thread"); return true; }
 
 bool OpenXrApp::start() {
-    if (!initialized_) {
-        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: not initialized");
-        return false;
-    }
-    if (!session_.hasInstance()) {
-        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start skipped: invalid XrInstance");
-        return false;
-    }
+    pendingStart_ = true;
     if (running_) return true;
-    running_ = true; sessionRunning_ = false; initDone_ = false; initOk_ = false; initialized_ = false;
+    running_ = true;
+    sessionRunning_ = false;
+    initDone_ = false;
+    initOk_ = false;
+    initialized_ = false;
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp::start requested (pending)");
     thread_ = std::thread(&OpenXrApp::loop, this);
     std::unique_lock<std::mutex> lk(initMutex_);
     initCv_.wait(lk, [this] { return initDone_; });
@@ -26,6 +24,7 @@ bool OpenXrApp::start() {
 }
 
 bool OpenXrApp::initOnRenderThread() {
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp initializeOnRenderThread begin");
     auto fail = [this](const char* phase, const std::string& reason) { lastError_ = reason; XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER: %s failed: %s", phase, reason.c_str()); return false; };
     if (!session_.initializeLoaderAndInstance()) return fail("InstanceReady", session_.lastError());
     if (!session_.prepareGraphics()) return fail("GraphicsReady", session_.lastError());
@@ -41,6 +40,12 @@ void OpenXrApp::loop() {
     { std::lock_guard<std::mutex> lk(initMutex_); initDone_ = true; }
     initCv_.notify_all();
     if (!initOk_) { running_ = false; return; }
+    initialized_ = true;
+    if (pendingStart_) {
+        XR_LOGI("DDDVR/OpenXR", "pendingStart consumed");
+        pendingStart_ = false;
+    }
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp started");
     std::vector<XrView> views(2, {XR_TYPE_VIEW});
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
