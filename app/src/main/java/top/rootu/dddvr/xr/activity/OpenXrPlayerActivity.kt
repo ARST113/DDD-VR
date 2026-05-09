@@ -21,6 +21,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     private lateinit var bridge: OpenXrBridge
     private var activeSurface: Surface? = null
     private var initialized = false
+    private var playerInitialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +36,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
 
         playerManager = PlayerManager(this, object : Player.Listener {})
         playbackSession = PlaybackSession(playerManager)
+        playerInitialized = true
 
         playerManager.loadPlaylist(
             listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
@@ -46,12 +48,14 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         OpenXrDebugOverlay.logStartup(config)
 
         bridge = OpenXrBridge(this, this, config)
-        runCatching { bridge.start() }
-            .onFailure {
-                Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it)
-                finish()
-                return
-            }
+        val startOk = runCatching { bridge.start() }
+            .onFailure { Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it) }
+            .getOrDefault(false)
+        if (!startOk) {
+            Log.e("DDDVR/OpenXR", "OpenXR bridge start failed (null/invalid native handle)")
+            finish()
+            return
+        }
         initialized = true
     }
 
@@ -72,6 +76,8 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
                 it.release()
             }
             runCatching { bridge.destroy() }
+        }
+        if (playerInitialized) {
             playbackSession.release()
         }
         super.onDestroy()
