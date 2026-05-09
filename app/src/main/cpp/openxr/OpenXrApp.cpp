@@ -16,6 +16,10 @@ bool OpenXrApp::start() {
     initialized_ = false;
     XR_LOGI("DDDVR/OpenXR", "OpenXrApp::start requested (pending)");
     thread_ = std::thread(&OpenXrApp::loop, this);
+    std::unique_lock<std::mutex> lk(initMutex_);
+    initCv_.wait(lk, [this] { return initDone_; });
+    if (!initOk_) { XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start failed: %s", lastError_.c_str()); stopAndJoinThread(); return false; }
+    initialized_ = true;
     return true;
 }
 
