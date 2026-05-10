@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <chrono>
 #include <string>
 
 #include "OpenXrInput.h"
@@ -24,7 +25,7 @@ public:
 
 private:
     void loop();
-    void stopAndJoinThread();
+    void stopAndJoinThread(const char* reason);
     bool initOnRenderThread();
 
     OpenXrSession session_;
@@ -41,5 +42,7 @@ private:
     bool initDone_ = false;
     bool initOk_ = false;
     std::atomic<bool> firstFrameSubmitted_{false};
+    std::chrono::steady_clock::time_point startTime_{};
+    std::chrono::steady_clock::time_point lastWaitLog_{};
     std::string lastError_;
 };

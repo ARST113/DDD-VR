@@ -22,6 +22,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     private var activeSurface: Surface? = null
     private var initialized = false
     private var playerInitialized = false
+    private var smokeOnly = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,15 +35,17 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
             return
         }
 
-        playerManager = PlayerManager(this, object : Player.Listener {})
-        playbackSession = PlaybackSession(playerManager)
-        playerInitialized = true
-
-        playerManager.loadPlaylist(
-            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
-            0,
-            request.startPositionMs
-        )
+        smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true
+        if (!smokeOnly) {
+            playerManager = PlayerManager(this, object : Player.Listener {})
+            playbackSession = PlaybackSession(playerManager)
+            playerInitialized = true
+            playerManager.loadPlaylist(
+                listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
+                0,
+                request.startPositionMs
+            )
+        }
 
         val config = OpenXrPlaybackConfig.from(request)
         OpenXrDebugOverlay.logStartup(config)
@@ -72,7 +75,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     override fun onDestroy() {
         if (initialized) {
             activeSurface?.let {
-                playbackSession.clearSurface(it)
+                if (!smokeOnly && playerInitialized) playbackSession.clearSurface(it)
                 it.release()
             }
             runCatching { bridge.destroy() }
@@ -84,14 +87,17 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     }
 
     override fun onVideoSurfaceReady(surface: Surface) {
-        activeSurface?.let { playbackSession.clearSurface(it) }
+        activeSurface?.let {
+            if (!smokeOnly && playerInitialized) playbackSession.clearSurface(it)
+            it.release()
+        }
         activeSurface = surface
-        playbackSession.attachSurface(surface)
-        OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
+        if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
+        OpenXrDebugOverlay.logSurfaceAttached(isAttached = !smokeOnly && playerInitialized)
     }
 
-    override fun onPlayPause() { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() }
-    override fun onSeekBy(deltaMs: Long) { playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
+    override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }
+    override fun onSeekBy(deltaMs: Long) { if (!smokeOnly && playerInitialized) playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
     override fun onExit() { finish() }
 }

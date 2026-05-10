@@ -13,10 +13,10 @@ Invoke-Adb @("devices") | Write-Host
 Invoke-Adb @("install","-r",$ApkPath)|Write-Host
 Invoke-Adb @("logcat","-c")|Out-Null
 Invoke-Adb @("shell","am","force-stop","top.rootu.dddvr")|Out-Null
-Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.VIEW","-d",$VideoUrl,"-n","top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity")|Write-Host
-Start-Sleep -Seconds 12
+Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.VIEW","-d",$VideoUrl,"-n","top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity","--ez","openxr_smoke_only","true")|Write-Host
+Start-Sleep -Seconds 20
 $full=Invoke-Adb @("logcat","-d"); Set-Content (Join-Path $art "pico-openxr-log.txt") $full -Encoding UTF8
-$patterns=@("DDDVR/OpenXR","DDDVR/OpenXRLoader","DDDVR/OpenXRSession","DDDVR/OpenXRRenderer","OpenXR-Loader","APxrRuntime","BD_ForwardLoader","XR_KHR_android_create_instance","setApplicationActivity","xrCreateInstance","xrGetSystem","xrGetOpenGLESGraphicsRequirementsKHR","xrCreateSession","xrCreateSwapchain","xrEnumerateSwapchainFormats","xrAcquireSwapchainImage","xrWaitSwapchainImage","xrReleaseSwapchainImage","xrWaitFrame","xrBeginFrame","xrLocateViews","xrEndFrame","fbo status","GL_FRAMEBUFFER","glErr","CURRENT_BLOCKER","AndroidRuntime","FATAL","Exception","UnsatisfiedLinkError")
+$patterns=@("DDDVR/OpenXR","DDDVR/OpenXRLoader","DDDVR/OpenXRSession","DDDVR/OpenXRRenderer","OpenXR-Loader","APxrRuntime","BD_ForwardLoader","XR_KHR_android_create_instance","setApplicationActivity","xrCreateInstance","xrGetSystem","xrGetOpenGLESGraphicsRequirementsKHR","xrCreateSession","xrCreateSwapchain","xrEnumerateSwapchainFormats","xrAcquireSwapchainImage","xrWaitSwapchainImage","xrReleaseSwapchainImage","xrWaitFrame","xrBeginFrame","xrLocateViews","xrEndFrame","fbo status","GL_FRAMEBUFFER","glErr","CURRENT_BLOCKER","AndroidRuntime","FATAL","Exception","UnsatisfiedLinkError","nativeResume called","nativePause called","nativeDestroy called","OpenXrApp::pause requested","OpenXrApp::resume requested","OpenXrApp::destroy requested","stopAndJoinThread reason")
 $re=($patterns|%{[Regex]::Escape($_)})-join "|"; ($full -split "`r?`n"|?{$_ -match $re}) -join "`n" | Set-Content (Join-Path $art "pico-openxr-filtered.txt") -Encoding UTF8
 Invoke-Adb @("shell","screencap","-p","/sdcard/pico-openxr.png") -AllowFailure|Out-Null; Invoke-Adb @("pull","/sdcard/pico-openxr.png",(Join-Path $art "pico-openxr.png")) -AllowFailure|Out-Null
 $checks=[ordered]@{

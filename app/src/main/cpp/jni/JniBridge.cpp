@@ -41,8 +41,8 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeStart(JNIEnv*, jobject, jlong 
     return JNI_TRUE;
 }
 extern "C" JNIEXPORT void JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeResume(JNIEnv*, jobject, jlong handle) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->resume(); }
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeResume(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativeResume called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->resume(); }
 extern "C" JNIEXPORT void JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativePause(JNIEnv*, jobject, jlong handle) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->pause(); }
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativePause(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativePause called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->pause(); }
 extern "C" JNIEXPORT void JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeDestroy(JNIEnv*, jobject, jlong handle) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (!app) return; app->destroy(); delete app; }
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeDestroy(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativeDestroy called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (!app) return; app->destroy(); delete app; }
