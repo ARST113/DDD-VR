@@ -28,6 +28,7 @@ endif()
 add_library(dddvr_openxr SHARED
     jni/JniBridge.cpp
     openxr/OpenXrApp.cpp
+    openxr/OpenXrLoader.cpp
     openxr/OpenXrSession.cpp
     openxr/OpenXrSwapchain.cpp
     openxr/OpenXrRenderer.cpp
