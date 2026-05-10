@@ -4,6 +4,12 @@
 #include <cstring>
 #include <vector>
 
+namespace {
+const char* sessionStateToString(XrSessionState state){
+ switch(state){case XR_SESSION_STATE_UNKNOWN:return "XR_SESSION_STATE_UNKNOWN";case XR_SESSION_STATE_IDLE:return "XR_SESSION_STATE_IDLE";case XR_SESSION_STATE_READY:return "XR_SESSION_STATE_READY";case XR_SESSION_STATE_SYNCHRONIZED:return "XR_SESSION_STATE_SYNCHRONIZED";case XR_SESSION_STATE_VISIBLE:return "XR_SESSION_STATE_VISIBLE";case XR_SESSION_STATE_FOCUSED:return "XR_SESSION_STATE_FOCUSED";case XR_SESSION_STATE_STOPPING:return "XR_SESSION_STATE_STOPPING";case XR_SESSION_STATE_LOSS_PENDING:return "XR_SESSION_STATE_LOSS_PENDING";case XR_SESSION_STATE_EXITING:return "XR_SESSION_STATE_EXITING";default:return "XR_SESSION_STATE_UNKNOWN";}
+}
+}
+
 bool OpenXrSession::hasExtension(const char* name) { uint32_t count = 0; xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr); std::vector<XrExtensionProperties> exts(count, {XR_TYPE_EXTENSION_PROPERTIES}); xrEnumerateInstanceExtensionProperties(nullptr, count, &count, exts.data()); for (auto& e : exts) if (strcmp(e.extensionName, name) == 0) return true; return false; }
 
 bool OpenXrSession::initializeLoaderAndInstance() {
@@ -48,7 +54,19 @@ bool OpenXrSession::createSession() { XrGraphicsBindingOpenGLESAndroidKHR gl{XR_
 bool OpenXrSession::createReferenceSpace() { XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w = 1.f; XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); XR_LOGI("DDDVR/OpenXRSession", "xrCreateReferenceSpace result=%d", r); if (r != XR_SUCCESS) { lastError_ = "xrCreateReferenceSpace failed: " + std::to_string(r); return false; } return true; }
 bool OpenXrSession::begin() { XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; XrResult r = xrBeginSession(session_, &bi); XR_LOGI("DDDVR/OpenXRSession", "xrBeginSession result=%d", r); return r == XR_SUCCESS; }
 bool OpenXrSession::end() { XrResult r = xrEndSession(session_); XR_LOGI("DDDVR/OpenXRSession", "xrEndSession result=%d", r); return r == XR_SUCCESS; }
-void OpenXrSession::pollEvents() { if (instance_ == XR_NULL_HANDLE) return; XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER}; while (xrPollEvent(instance_, &ev) == XR_SUCCESS) { if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) state_ = reinterpret_cast<XrEventDataSessionStateChanged*>(&ev)->state; ev = {XR_TYPE_EVENT_DATA_BUFFER}; } }
+void OpenXrSession::pollEvents() {
+    if (instance_ == XR_NULL_HANDLE) return;
+    XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
+    while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
+        XR_LOGI("DDDVR/OpenXRSession", "xrPollEvent: type=%d", ev.type);
+        if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+            const auto* changed = reinterpret_cast<XrEventDataSessionStateChanged*>(&ev);
+            state_ = changed->state;
+            XR_LOGI("DDDVR/OpenXRSession", "XrEventDataSessionStateChanged state=%s", sessionStateToString(state_));
+        }
+        ev = {XR_TYPE_EVENT_DATA_BUFFER};
+    }
+}
 
 void OpenXrSession::shutdown() {
     if (appSpace_ != XR_NULL_HANDLE) { xrDestroySpace(appSpace_); appSpace_ = XR_NULL_HANDLE; }

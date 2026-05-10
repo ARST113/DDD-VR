@@ -40,5 +40,6 @@ private:
     std::condition_variable initCv_;
     bool initDone_ = false;
     bool initOk_ = false;
+    std::atomic<bool> firstFrameSubmitted_{false};
     std::string lastError_;
 };
