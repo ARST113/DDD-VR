@@ -21,6 +21,8 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     private lateinit var bridge: OpenXrBridge
     private var activeSurface: Surface? = null
     private var initialized = false
+    private var playerInitialized = false
+    private var smokeOnly = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,25 +35,30 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
             return
         }
 
-        playerManager = PlayerManager(this, object : Player.Listener {})
-        playbackSession = PlaybackSession(playerManager)
-
-        playerManager.loadPlaylist(
-            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
-            0,
-            request.startPositionMs
-        )
+        smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true
+        if (!smokeOnly) {
+            playerManager = PlayerManager(this, object : Player.Listener {})
+            playbackSession = PlaybackSession(playerManager)
+            playerInitialized = true
+            playerManager.loadPlaylist(
+                listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
+                0,
+                request.startPositionMs
+            )
+        }
 
         val config = OpenXrPlaybackConfig.from(request)
         OpenXrDebugOverlay.logStartup(config)
 
         bridge = OpenXrBridge(this, this, config)
-        runCatching { bridge.start() }
-            .onFailure {
-                Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it)
-                finish()
-                return
-            }
+        val startOk = runCatching { bridge.start() }
+            .onFailure { Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it) }
+            .getOrDefault(false)
+        if (!startOk) {
+            Log.e("DDDVR/OpenXR", "OpenXR bridge start failed (null/invalid native handle)")
+            finish()
+            return
+        }
         initialized = true
     }
 
@@ -68,10 +75,12 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     override fun onDestroy() {
         if (initialized) {
             activeSurface?.let {
-                playbackSession.clearSurface(it)
+                if (!smokeOnly && playerInitialized) playbackSession.clearSurface(it)
                 it.release()
             }
             runCatching { bridge.destroy() }
+        }
+        if (playerInitialized) {
             playbackSession.release()
         }
         super.onDestroy()
@@ -80,12 +89,12 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     override fun onVideoSurfaceReady(surface: Surface) {
         activeSurface?.let { playbackSession.clearSurface(it) }
         activeSurface = surface
-        playbackSession.attachSurface(surface)
+        if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
-    override fun onPlayPause() { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() }
-    override fun onSeekBy(deltaMs: Long) { playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
+    override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }
+    override fun onSeekBy(deltaMs: Long) { if (!smokeOnly && playerInitialized) playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
     override fun onExit() { finish() }
 }
