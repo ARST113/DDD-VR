@@ -37,6 +37,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var hasWindowFocus = false
     private var pausedBeforeXrStart = false
     private var xrStartAttempt = 0
+    private var notResumedRetryCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +65,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     override fun onResume() {
         super.onResume()
         resumed = true
+        notResumedRetryCount = 0
         Log.i(TAG, "ACTIVITY_ON_RESUME initialized=$initialized scheduled=$xrStartScheduled pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
         if (!::bridge.isInitialized) {
             Log.w(TAG, "ACTIVITY_ON_RESUME bridge not initialized")
@@ -105,15 +107,22 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             Log.w(TAG, "XR_START_PAUSED_BEFORE_INIT keep pending start")
         }
 
-        mainHandler.removeCallbacks(startOpenXrRunnable)
-        xrStartScheduled = false
-        mainHandler.removeCallbacks(playerStartRunnable)
-        playerStartScheduled = false
-
         if (initialized) {
+            mainHandler.removeCallbacks(startOpenXrRunnable)
+            xrStartScheduled = false
             runCatching { bridge.onPause() }
                 .onFailure { Log.e(TAG, "Unable to pause OpenXR bridge", it) }
+        } else {
+            // Keep the delayed OpenXR start runnable alive across Pico's very early shell/
+            // boundary pause. The runnable will execute, observe resumed=false, and either
+            // wait for a later resume/focus callback or emit an explicit blocker after
+            // bounded retries. Cancelling here recreates the PR #41 failure: the log stops
+            // at XR_START_PAUSED_BEFORE_INIT and native OpenXR is never called.
+            Log.i(TAG, "XR_START_PENDING_ACROSS_EARLY_PAUSE scheduled=$xrStartScheduled")
         }
+
+        mainHandler.removeCallbacks(playerStartRunnable)
+        playerStartScheduled = false
         super.onPause()
     }
 
@@ -184,8 +193,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
         if (!resumed) {
-            Log.w(TAG, "XR_START_EXECUTE_SKIPPED_NOT_RESUMED attempt=$xrStartAttempt pausedBeforeStart=$pausedBeforeXrStart")
-            if (xrStartAttempt < MAX_XR_START_ATTEMPTS) {
+            notResumedRetryCount += 1
+            Log.w(TAG, "XR_START_EXECUTE_SKIPPED_NOT_RESUMED retry=$notResumedRetryCount pausedBeforeStart=$pausedBeforeXrStart")
+            if (notResumedRetryCount < MAX_NOT_RESUMED_RETRIES) {
                 scheduleOpenXrStart("not_resumed_retry", XR_RETRY_DELAY_MS)
             } else {
                 Log.e(TAG, "CURRENT_BLOCKER ACTIVITY_PAUSED_BEFORE_DELAYED_XR_START")
@@ -193,6 +203,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
 
+        notResumedRetryCount = 0
         xrStartAttempt += 1
         Log.i(TAG, "XR_START_EXECUTE attempt=$xrStartAttempt pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
         Log.i(TAG, "XR_START_CALL_BEGIN")
@@ -258,6 +269,6 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         private const val XR_START_DELAY_MS = 300L
         private const val XR_RETRY_DELAY_MS = 500L
         private const val PLAYER_START_DELAY_MS = 200L
-        private const val MAX_XR_START_ATTEMPTS = 5
+        private const val MAX_NOT_RESUMED_RETRIES = 5
     }
 }
