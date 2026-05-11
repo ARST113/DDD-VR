@@ -400,6 +400,14 @@
             android:screenOrientation="landscape"
             android:resizeableActivity="false"
             android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density" />
+        <activity
+            android:name=".xr.activity.OpenXrSmokeActivity"
+            android:exported="true"
+            android:theme="@style/Theme.App.OpenXrFullscreen"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="false"
+            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density" />
 
     </application>
 

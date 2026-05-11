@@ -101,6 +101,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
         super.onTopResumedActivityChanged(isTopResumedActivity)
         topResumed = isTopResumedActivity
+        if (initialized && xrStartState == XrStartState.STARTED && !isTopResumedActivity) {
+            Log.e(TAG, "CURRENT_BLOCKER ACTIVITY_LOST_TOP_RESUMED_AFTER_SWAPCHAIN")
+        }
         logLifecycle("TOP_RESUMED_CHANGED isTopResumed=$isTopResumedActivity")
     }
 
@@ -146,6 +149,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     override fun onPause() {
         logLifecycle("ACTIVITY_ON_PAUSE")
+        if (initialized && xrStartState == XrStartState.STARTED) {
+            Log.e(TAG, "CURRENT_BLOCKER SEETHROUGH_SETTINGS_STOLE_FOCUS")
+        }
         resumed = false
         hasWindowFocus = false
 
