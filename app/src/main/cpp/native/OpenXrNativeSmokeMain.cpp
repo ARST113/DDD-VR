@@ -53,7 +53,7 @@ void android_main(android_app* app) {
     while (running) {
         int events = 0;
         android_poll_source* source = nullptr;
-        ALooper_pollOnce(0, nullptr, &events, reinterpret_cast<void**>(&source));
+        ALooper_pollOnce(16, nullptr, &events, reinterpret_cast<void**>(&source));
         if (source) source->process(app, source);
         if (app->destroyRequested) {
             XR_LOGI("DDDVR/OpenXRNativeSmoke", "NATIVE_SMOKE_DESTROY_REQUESTED");

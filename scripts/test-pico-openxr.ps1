@@ -21,7 +21,7 @@ function Start-SmokeLaunch {
         Write-Host "LAUNCH_MODE direct_component"
         Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.VIEW","-d",$VideoUrl,"-n","top.rootu.dddvr/.xr.activity.OpenXrPlayerActivity","--ez","openxr_smoke_only","true")|Write-Host
     } else {
-        Write-Host "LAUNCH_MODE launcher_entry"
+        Write-Host "LAUNCH_MODE vr_entry_then_component"
         Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.MAIN","-c","android.intent.category.LAUNCHER","-n","top.rootu.dddvr/.vr.activity.VrPlayerActivity")|Write-Host
         Start-Sleep -Seconds 2
         Invoke-Adb @("shell","am","start","-W","-a","android.intent.action.VIEW","-d",$VideoUrl,"-n","top.rootu.dddvr/.xr.activity.OpenXrSmokeActivity")|Write-Host
