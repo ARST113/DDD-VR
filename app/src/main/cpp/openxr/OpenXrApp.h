@@ -44,5 +44,6 @@ private:
     std::atomic<bool> firstFrameSubmitted_{false};
     std::chrono::steady_clock::time_point startTime_{};
     std::chrono::steady_clock::time_point lastWaitLog_{};
+    std::atomic<bool> fboOkSeen_{false};
     std::string lastError_;
 };
