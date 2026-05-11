@@ -8,10 +8,9 @@ bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init 
 
 bool OpenXrApp::start() {
     pendingStart_ = true;
-    if (running_) return initialized_;
+    if (running_) return true;
     running_ = true;
     sessionRunning_ = false;
-    initDone_ = false;
     initOk_ = false;
     initialized_ = false;
     firstFrameSubmitted_ = false;
@@ -20,13 +19,7 @@ bool OpenXrApp::start() {
     lastWaitLog_ = startTime_;
     XR_LOGI("DDDVR/OpenXR", "OpenXrApp::start requested (pending)");
     thread_ = std::thread(&OpenXrApp::loop, this);
-    std::unique_lock<std::mutex> lk(initMutex_);
-    initCv_.wait(lk, [this]{ return initDone_; });
-    if (!initOk_) {
-        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::start failed: %s", lastError_.c_str());
-        stopAndJoinThread("init_failed");
-        return false;
-    }
+    XR_LOGI("DDDVR/OpenXR", "OpenXrApp::start returned without waiting for XR_READY");
     return true;
 }
 
@@ -44,9 +37,8 @@ bool OpenXrApp::initOnRenderThread() {
 
 void OpenXrApp::loop() {
     initOk_ = initOnRenderThread();
-    { std::lock_guard<std::mutex> lk(initMutex_); initDone_ = true; }
-    initCv_.notify_all();
     if (!initOk_) {
+        XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop initialization failed: %s", lastError_.c_str());
         XR_LOGI("DDDVR/OpenXR", "stopAndJoinThread reason=init_failed");
         XR_LOGI("DDDVR/OpenXR", "failed initialization cleanup");
         swapchain_.destroy();
