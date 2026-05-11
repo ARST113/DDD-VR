@@ -13,6 +13,7 @@ import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
 import top.rootu.dddvr.vr.activity.VrIntentParser
+import top.rootu.dddvr.vr.activity.VrPlaybackRequest
 import top.rootu.dddvr.xr.bridge.OpenXrBridge
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
 import top.rootu.dddvr.xr.ui.OpenXrDebugOverlay
@@ -22,87 +23,123 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private lateinit var playbackSession: PlaybackSession
     private lateinit var bridge: OpenXrBridge
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val startOpenXrRunnable = Runnable { startOpenXrFromResumedState() }
+    private val startOpenXrRunnable = Runnable { startOpenXrFromScheduledState() }
+    private val playerStartRunnable = Runnable { initializePlayerIfNeeded("post_xr_start") }
     private var activeSurface: Surface? = null
+    private var playbackRequest: VrPlaybackRequest? = null
     private var initialized = false
     private var playerInitialized = false
     private var smokeOnly = false
     private var xrStartScheduled = false
+    private var playerStartScheduled = false
     private var destroyed = false
+    private var resumed = false
+    private var hasWindowFocus = false
+    private var pausedBeforeXrStart = false
+    private var xrStartAttempt = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.i("DDDVR/OpenXR", "ACTIVITY_ON_CREATE_BEGIN")
+        Log.i(TAG, "ACTIVITY_ON_CREATE_BEGIN")
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val request = VrIntentParser.parse(intent) ?: run {
-            Log.e("DDDVR/OpenXR", "Invalid intent for OpenXrPlayerActivity")
+            Log.e(TAG, "Invalid intent for OpenXrPlayerActivity")
             finish()
             return
         }
+        playbackRequest = request
 
         smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true
-        Log.i("DDDVR/OpenXR", "OpenXrPlayerActivity smokeOnly=$smokeOnly")
-        if (!smokeOnly) {
-            playerManager = PlayerManager(this, object : Player.Listener {})
-            playbackSession = PlaybackSession(playerManager)
-            playerInitialized = true
-            playerManager.loadPlaylist(
-                listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
-                0,
-                request.startPositionMs
-            )
-        }
+        Log.i(TAG, "OpenXrPlayerActivity smokeOnly=$smokeOnly")
 
         val config = OpenXrPlaybackConfig.from(request)
         OpenXrDebugOverlay.logStartup(config)
 
         bridge = OpenXrBridge(this, this, config)
-        Log.i("DDDVR/OpenXR", "ACTIVITY_ON_CREATE_END")
+        Log.i(TAG, "ACTIVITY_ON_CREATE_END")
     }
 
     override fun onResume() {
         super.onResume()
-        Log.i("DDDVR/OpenXR", "ACTIVITY_ON_RESUME initialized=$initialized scheduled=$xrStartScheduled")
+        resumed = true
+        Log.i(TAG, "ACTIVITY_ON_RESUME initialized=$initialized scheduled=$xrStartScheduled pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
         if (!::bridge.isInitialized) {
-            Log.w("DDDVR/OpenXR", "ACTIVITY_ON_RESUME bridge not initialized")
+            Log.w(TAG, "ACTIVITY_ON_RESUME bridge not initialized")
             return
         }
         if (initialized) {
             runCatching { bridge.onResume() }
-                .onFailure { Log.e("DDDVR/OpenXR", "Unable to resume OpenXR bridge", it) }
+                .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge", it) }
+            schedulePlayerStart("resume_initialized")
         } else {
-            scheduleOpenXrStart()
+            scheduleOpenXrStart("onResume", XR_START_DELAY_MS)
+        }
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        Log.i(TAG, "ACTIVITY_ON_POST_RESUME initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed focus=$hasWindowFocus")
+        if (!initialized) {
+            scheduleOpenXrStart("onPostResume", XR_START_DELAY_MS)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        hasWindowFocus = hasFocus
+        Log.i(TAG, "WINDOW_FOCUS_CHANGED hasFocus=$hasFocus initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed")
+        if (hasFocus && resumed && !initialized) {
+            scheduleOpenXrStart("windowFocus", XR_START_DELAY_MS)
         }
     }
 
     override fun onPause() {
-        Log.i("DDDVR/OpenXR", "ACTIVITY_ON_PAUSE initialized=$initialized scheduled=$xrStartScheduled")
+        Log.i(TAG, "ACTIVITY_ON_PAUSE initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed")
+        resumed = false
+        hasWindowFocus = false
+
+        if (!initialized && xrStartScheduled) {
+            pausedBeforeXrStart = true
+            Log.w(TAG, "XR_START_PAUSED_BEFORE_INIT keep pending start")
+        }
+
         mainHandler.removeCallbacks(startOpenXrRunnable)
         xrStartScheduled = false
+        mainHandler.removeCallbacks(playerStartRunnable)
+        playerStartScheduled = false
+
         if (initialized) {
             runCatching { bridge.onPause() }
-                .onFailure { Log.e("DDDVR/OpenXR", "Unable to pause OpenXR bridge", it) }
+                .onFailure { Log.e(TAG, "Unable to pause OpenXR bridge", it) }
         }
         super.onPause()
     }
 
     override fun onDestroy() {
-        Log.i("DDDVR/OpenXR", "ACTIVITY_ON_DESTROY initialized=$initialized scheduled=$xrStartScheduled")
+        Log.i(TAG, "ACTIVITY_ON_DESTROY initialized=$initialized scheduled=$xrStartScheduled playerInitialized=$playerInitialized")
         destroyed = true
+        resumed = false
         mainHandler.removeCallbacks(startOpenXrRunnable)
+        mainHandler.removeCallbacks(playerStartRunnable)
         xrStartScheduled = false
-        if (initialized) {
-            activeSurface?.let {
-                if (!smokeOnly && playerInitialized) playbackSession.clearSurface(it)
-                it.release()
+        playerStartScheduled = false
+        activeSurface?.let { surface ->
+            if (!smokeOnly && playerInitialized) {
+                runCatching { playbackSession.clearSurface(surface) }
+                    .onFailure { Log.e(TAG, "Unable to clear playback surface", it) }
             }
+            surface.release()
+            activeSurface = null
+        }
+        if (::bridge.isInitialized) {
             runCatching { bridge.destroy() }
-                .onFailure { Log.e("DDDVR/OpenXR", "Unable to destroy OpenXR bridge", it) }
+                .onFailure { Log.e(TAG, "Unable to destroy OpenXR bridge", it) }
         }
         if (playerInitialized) {
             playbackSession.release()
+            playerInitialized = false
         }
         super.onDestroy()
     }
@@ -114,47 +151,101 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
-    private fun scheduleOpenXrStart() {
+    private fun scheduleOpenXrStart(reason: String, delayMs: Long) {
         if (destroyed || !::bridge.isInitialized) return
+        if (initialized) {
+            Log.i(TAG, "XR_START_SKIPPED already initialized reason=$reason")
+            return
+        }
         if (xrStartScheduled) {
-            Log.i("DDDVR/OpenXR", "XR_START_ALREADY_SCHEDULED")
+            Log.i(TAG, "XR_START_ALREADY_SCHEDULED reason=$reason attempt=$xrStartAttempt")
             return
         }
         xrStartScheduled = true
-        Log.i("DDDVR/OpenXR", "XR_START_SCHEDULED delayMs=300")
-        mainHandler.postDelayed(startOpenXrRunnable, XR_START_DELAY_MS)
+        Log.i(TAG, "XR_START_SCHEDULED reason=$reason delayMs=$delayMs attempt=${xrStartAttempt + 1}")
+        mainHandler.postDelayed(startOpenXrRunnable, delayMs)
     }
 
-    private fun startOpenXrFromResumedState() {
+    private fun startOpenXrFromScheduledState() {
         xrStartScheduled = false
         if (destroyed) {
-            Log.w("DDDVR/OpenXR", "XR_START_SKIPPED destroyed=true")
+            Log.w(TAG, "XR_START_SKIPPED destroyed=true")
             return
         }
         if (!::bridge.isInitialized) {
-            Log.e("DDDVR/OpenXR", "XR_START_SKIPPED bridge not initialized")
+            Log.e(TAG, "XR_START_SKIPPED bridge not initialized")
             return
         }
         if (initialized) {
-            Log.i("DDDVR/OpenXR", "XR_START_SKIPPED already initialized")
+            Log.i(TAG, "XR_START_SKIPPED already initialized")
             runCatching { bridge.onResume() }
+                .onFailure { Log.e(TAG, "Unable to resume already initialized OpenXR bridge", it) }
+            schedulePlayerStart("already_initialized")
+            return
+        }
+        if (!resumed) {
+            Log.w(TAG, "XR_START_EXECUTE_SKIPPED_NOT_RESUMED attempt=$xrStartAttempt pausedBeforeStart=$pausedBeforeXrStart")
+            if (xrStartAttempt < MAX_XR_START_ATTEMPTS) {
+                scheduleOpenXrStart("not_resumed_retry", XR_RETRY_DELAY_MS)
+            } else {
+                Log.e(TAG, "CURRENT_BLOCKER ACTIVITY_PAUSED_BEFORE_DELAYED_XR_START")
+            }
             return
         }
 
-        Log.i("DDDVR/OpenXR", "XR_START_CALL_BEGIN")
+        xrStartAttempt += 1
+        Log.i(TAG, "XR_START_EXECUTE attempt=$xrStartAttempt pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
+        Log.i(TAG, "XR_START_CALL_BEGIN")
         val startOk = runCatching { bridge.start() }
-            .onFailure { Log.e("DDDVR/OpenXR", "Unable to start OpenXR bridge", it) }
+            .onFailure { Log.e(TAG, "Unable to start OpenXR bridge", it) }
             .getOrDefault(false)
-        Log.i("DDDVR/OpenXR", "XR_START_CALL_END startOk=$startOk")
-        Log.i("DDDVR/OpenXR", "NATIVE_START_RETURNED startOk=$startOk")
+        Log.i(TAG, "XR_START_CALL_END startOk=$startOk")
+        Log.i(TAG, "NATIVE_START_RETURNED startOk=$startOk")
         if (!startOk) {
-            Log.e("DDDVR/OpenXR", "OpenXR bridge start failed (null/invalid native handle)")
+            Log.e(TAG, "OpenXR bridge start failed (null/invalid native handle)")
             finish()
             return
         }
         initialized = true
+        pausedBeforeXrStart = false
         runCatching { bridge.onResume() }
-            .onFailure { Log.e("DDDVR/OpenXR", "Unable to resume OpenXR bridge after start", it) }
+            .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge after start", it) }
+        schedulePlayerStart("xr_started")
+    }
+
+    private fun schedulePlayerStart(reason: String) {
+        if (smokeOnly || playerInitialized || destroyed) return
+        if (!initialized) {
+            Log.i(TAG, "PLAYER_START_DELAYED reason=$reason initialized=false")
+            return
+        }
+        if (playerStartScheduled) {
+            Log.i(TAG, "PLAYER_START_ALREADY_SCHEDULED reason=$reason")
+            return
+        }
+        playerStartScheduled = true
+        Log.i(TAG, "PLAYER_START_SCHEDULED reason=$reason delayMs=$PLAYER_START_DELAY_MS")
+        mainHandler.postDelayed(playerStartRunnable, PLAYER_START_DELAY_MS)
+    }
+
+    private fun initializePlayerIfNeeded(reason: String) {
+        playerStartScheduled = false
+        if (destroyed || smokeOnly || playerInitialized) return
+        val request = playbackRequest ?: run {
+            Log.e(TAG, "PLAYER_START_SKIPPED missing playback request")
+            return
+        }
+        Log.i(TAG, "PLAYER_START_BEGIN reason=$reason")
+        playerManager = PlayerManager(this, object : Player.Listener {})
+        playbackSession = PlaybackSession(playerManager)
+        playerInitialized = true
+        playerManager.loadPlaylist(
+            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
+            0,
+            request.startPositionMs
+        )
+        activeSurface?.let { playbackSession.attachSurface(it) }
+        Log.i(TAG, "PLAYER_START_END")
     }
 
     override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }
@@ -163,6 +254,10 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     override fun onExit() { finish() }
 
     companion object {
+        private const val TAG = "DDDVR/OpenXR"
         private const val XR_START_DELAY_MS = 300L
+        private const val XR_RETRY_DELAY_MS = 500L
+        private const val PLAYER_START_DELAY_MS = 200L
+        private const val MAX_XR_START_ATTEMPTS = 5
     }
 }
