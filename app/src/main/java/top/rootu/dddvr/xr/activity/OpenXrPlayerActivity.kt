@@ -93,7 +93,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         }
         activeSurface = surface
         if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
-        OpenXrDebugOverlay.logSurfaceAttached(isAttached = !smokeOnly && playerInitialized)
+        OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
     override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }

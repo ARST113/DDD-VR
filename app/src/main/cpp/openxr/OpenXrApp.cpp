@@ -63,6 +63,7 @@ void OpenXrApp::loop() {
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
     bool loggedInvalidLoopState = false;
+    uint64_t frameCounter = 0;
 
     while (running_) {
         if (!initialized_) {
@@ -70,6 +71,7 @@ void OpenXrApp::loop() {
                 XR_LOGE("DDDVR/OpenXR", "OpenXrApp::loop invalid state: initialized=false");
                 loggedInvalidLoopState = true;
             }
+        frameCounter++;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -101,25 +103,28 @@ void OpenXrApp::loop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-        XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; XrResult wr = xrWaitFrame(session_.session(), &wi, &fs); XR_LOGI("DDDVR/OpenXRRenderer", "xrWaitFrame result=%d", wr); if (wr != XR_SUCCESS) continue;
-        XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; XrResult br = xrBeginFrame(session_.session(), &bi); XR_LOGI("DDDVR/OpenXRRenderer", "xrBeginFrame result=%d", br); if (br != XR_SUCCESS) continue;
-        XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime = fs.predictedDisplayTime; li.space = session_.appSpace(); XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count = 0; XrResult lr = xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); XR_LOGI("DDDVR/OpenXRRenderer", "xrLocateViews result=%d", lr);
+        XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; XrResult wr = xrWaitFrame(session_.session(), &wi, &fs); if (frameCounter < 10 || frameCounter % 120 == 0 || wr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrWaitFrame result=%d", wr); if (wr != XR_SUCCESS) continue;
+        XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; XrResult br = xrBeginFrame(session_.session(), &bi); if (frameCounter < 10 || frameCounter % 120 == 0 || br != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrBeginFrame result=%d", br); if (br != XR_SUCCESS) continue;
+        XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime = fs.predictedDisplayTime; li.space = session_.appSpace(); XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count = 0; XrResult lr = xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); if (frameCounter < 10 || frameCounter % 120 == 0 || lr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrLocateViews result=%d", lr);
         bool acquired = false; bool fboOk = false;
-        if (lr == XR_SUCCESS && swapchain_.acquireImage()) { acquired = true; glBindFramebuffer(GL_FRAMEBUFFER, fbo); fboOk = true; for (int eye=0; eye<2; ++eye){ auto pre=glGetError(); glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(),0,eye); auto fb=glCheckFramebufferStatus(GL_FRAMEBUFFER); auto post=glGetError(); XR_LOGI("DDDVR/OpenXRRenderer","eye=%d imageArrayIndex=%d tex=%u viewport=%dx%d swap=%dx%d fbo status=0x%x glErrPre=0x%x glErrPost=0x%x",eye,eye,swapchain_.activeColorTexture(),swapchain_.width(),swapchain_.height(),swapchain_.width(),swapchain_.height(),fb,pre,post); if (fb!=GL_FRAMEBUFFER_COMPLETE){XR_LOGE("DDDVR/OpenXR","CURRENT_BLOCKER: FBO incomplete eye=%d status=0x%x glErr=0x%x",eye,fb,post); fboOk=false; break;} renderer_.renderEye(eye, swapchain_.width(), swapchain_.height()); } }
+        if (lr == XR_SUCCESS && swapchain_.acquireImage()) { acquired = true; glBindFramebuffer(GL_FRAMEBUFFER, fbo); fboOk = true; for (int eye=0; eye<2; ++eye){ auto pre=glGetError(); glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(),0,eye); auto fb=glCheckFramebufferStatus(GL_FRAMEBUFFER); auto post=glGetError(); if (frameCounter < 10 || frameCounter % 120 == 0 || fb!=GL_FRAMEBUFFER_COMPLETE || post!=GL_NO_ERROR) XR_LOGI("DDDVR/OpenXRRenderer","eye=%d imageArrayIndex=%d tex=%u viewport=%dx%d swap=%dx%d fbo status=0x%x glErrPre=0x%x glErrPost=0x%x",eye,eye,swapchain_.activeColorTexture(),swapchain_.width(),swapchain_.height(),swapchain_.width(),swapchain_.height(),fb,pre,post); if (fb==GL_FRAMEBUFFER_COMPLETE){ XR_LOGI("DDDVR/OpenXRCheck", "FBO_OK"); }
+            if (fb!=GL_FRAMEBUFFER_COMPLETE){ XR_LOGE("DDDVR/OpenXRCheck", "FBO_FAIL"); XR_LOGE("DDDVR/OpenXR","CURRENT_BLOCKER: FBO incomplete eye=%d status=0x%x glErr=0x%x",eye,fb,post); fboOk=false; break;} renderer_.renderEye(eye, swapchain_.width(), swapchain_.height()); } }
         XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO}; ei.displayTime = fs.predictedDisplayTime; ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; ei.layerCount = 0;
         XrCompositionLayerProjectionView pv[2]{}; XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION}; const XrCompositionLayerBaseHeader* layers[1];
         if (lr==XR_SUCCESS && acquired && fboOk){ for(int eye=0;eye<2;++eye){pv[eye].type=XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;pv[eye].pose=views[eye].pose;pv[eye].fov=views[eye].fov;pv[eye].subImage.swapchain=swapchain_.handle();pv[eye].subImage.imageRect.extent={swapchain_.width(),swapchain_.height()};pv[eye].subImage.imageArrayIndex=eye;} layer.space=session_.appSpace();layer.viewCount=2;layer.views=pv;layers[0]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer); ei.layerCount=1; ei.layers=layers; }
         if (acquired) {
             swapchain_.releaseImage();
         }
-        XrResult er = xrEndFrame(session_.session(), &ei); XR_LOGI("DDDVR/OpenXRRenderer", "xrEndFrame result=%d", er);
+        XrResult er = xrEndFrame(session_.session(), &ei); if (frameCounter < 10 || frameCounter % 120 == 0 || er != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrEndFrame result=%d", er);
         if (er == XR_SUCCESS && !firstFrameSubmitted_) {
+            XR_LOGI("DDDVR/OpenXRCheck", "FRAME_LOOP_OK");
             firstFrameSubmitted_ = true;
             XR_LOGI("DDDVR/OpenXR", "first successful xrEndFrame");
         }
     }
     XR_LOGI("DDDVR/OpenXR", "swapchain destroy reason=loop exit");
     swapchain_.destroy();
+    XR_LOGI("DDDVR/OpenXRCheck", "SUMMARY shutdown");
     XR_LOGI("DDDVR/OpenXR", "normal shutdown");
     XR_LOGI("DDDVR/OpenXR", "OpenXrSession destroy reason=loop exit");
     session_.shutdown();
