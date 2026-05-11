@@ -17,4 +17,8 @@ foreach($k in $checks.Keys){
   if($frameLoop -and $missingEarly -and $k -ne "Frame loop" -and -not $checks[$k]){ Write-Host "$k`tDiagnostics incomplete: frame loop is alive, but init markers are missing." }
   else { Write-Host "$k`t$(if($checks[$k]){'PASS'}else{'FAIL'})" }
 }
-Write-Host "CURRENT BLOCKER: $(if($frameLoop){'none at debug frame-loop level'}else{'unknown'})"
+$blocker='unknown'
+if($log -match 'SESSION_STUCK_IDLE_AFTER_SWAPCHAIN'){ $blocker='SESSION_STUCK_IDLE_AFTER_SWAPCHAIN' }
+elseif($log -match 'ACTIVITY_PAUSED_BEFORE_XR_READY'){ $blocker='ACTIVITY_PAUSED_BEFORE_XR_READY' }
+elseif($frameLoop){ $blocker='none at debug frame-loop level' }
+Write-Host "CURRENT BLOCKER: $blocker"

@@ -55,11 +55,7 @@ void OpenXrApp::loop() {
         return;
     }
     initialized_ = true;
-    if (pendingStart_) {
-        XR_LOGI("DDDVR/OpenXR", "pendingStart consumed");
-        pendingStart_ = false;
-    }
-    XR_LOGI("DDDVR/OpenXR", "OpenXrApp started");
+
     std::vector<XrView> views(2, {XR_TYPE_VIEW});
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
@@ -81,6 +77,11 @@ void OpenXrApp::loop() {
             XR_LOGI("DDDVR/OpenXRSession", "XR_SESSION_STATE_READY");
             sessionRunning_ = session_.begin();
             XR_LOGI("DDDVR/OpenXRSession", "sessionRunning=%s", sessionRunning_ ? "true" : "false");
+            if (sessionRunning_ && pendingStart_) {
+                pendingStart_ = false;
+                XR_LOGI("DDDVR/OpenXR", "pendingStart consumed");
+                XR_LOGI("DDDVR/OpenXR", "OpenXrApp started");
+            }
         }
         if (sessionRunning_ && session_.currentState() == XR_SESSION_STATE_STOPPING) {
             XR_LOGI("DDDVR/OpenXRSession", "XR_SESSION_STATE_STOPPING");
@@ -99,6 +100,9 @@ void OpenXrApp::loop() {
             if (now - lastWaitLog_ > std::chrono::seconds(1)) {
                 const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - startTime_).count();
                 XR_LOGI("DDDVR/OpenXR", "waiting READY state=%d elapsed=%lld running=%d initialized=%d sessionRunning=%d", session_.currentState(), (long long)elapsed, running_ ? 1 : 0, initialized_ ? 1 : 0, sessionRunning_ ? 1 : 0);
+                if (session_.currentState() == XR_SESSION_STATE_IDLE && elapsed >= 12) {
+                    XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER SESSION_STUCK_IDLE_AFTER_SWAPCHAIN");
+                }
                 lastWaitLog_ = now;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -132,6 +136,6 @@ void OpenXrApp::loop() {
 }
 
 void OpenXrApp::stopAndJoinThread(const char* reason){ XR_LOGI("DDDVR/OpenXR", "stopAndJoinThread reason=%s", reason); running_=false; if(thread_.joinable()) thread_.join(); sessionRunning_=false; }
-void OpenXrApp::pause(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::pause requested"); }
+void OpenXrApp::pause(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::pause requested"); if(!sessionRunning_) XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER ACTIVITY_PAUSED_BEFORE_XR_READY"); }
 void OpenXrApp::resume(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::resume requested"); }
 void OpenXrApp::destroy(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::destroy requested"); stopAndJoinThread("destroy"); }
