@@ -5,7 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Surface
 import android.view.WindowManager
-import androidx.appcompat.app.AppCompatActivity
+import android.app.Activity
 import androidx.media3.common.Player
 import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.model.MediaItem
@@ -15,7 +15,7 @@ import top.rootu.dddvr.xr.bridge.OpenXrBridge
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
 import top.rootu.dddvr.xr.ui.OpenXrDebugOverlay
 
-class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
+class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private lateinit var playerManager: PlayerManager
     private lateinit var playbackSession: PlaybackSession
     private lateinit var bridge: OpenXrBridge
@@ -36,6 +36,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
         }
 
         smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true
+        Log.i("DDDVR/OpenXR", "OpenXrPlayerActivity smokeOnly=$smokeOnly")
         if (!smokeOnly) {
             playerManager = PlayerManager(this, object : Player.Listener {})
             playbackSession = PlaybackSession(playerManager)
@@ -87,10 +88,7 @@ class OpenXrPlayerActivity : AppCompatActivity(), OpenXrBridge.Callbacks {
     }
 
     override fun onVideoSurfaceReady(surface: Surface) {
-        activeSurface?.let {
-            if (!smokeOnly && playerInitialized) playbackSession.clearSurface(it)
-            it.release()
-        }
+        if (!smokeOnly && playerInitialized) activeSurface?.let { playbackSession.clearSurface(it) }
         activeSurface = surface
         if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)

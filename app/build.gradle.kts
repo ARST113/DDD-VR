@@ -131,9 +131,6 @@ dependencies {
     // Для загрузки изображений
     implementation(libs.coil)
 
-    // поиск утечек
-    debugImplementation(libs.leakcanary.android)
-
     testImplementation(libs.junit)
     testImplementation("org.mockito:mockito-core:5.12.0")
     testImplementation("org.mockito:mockito-inline:5.2.0")
