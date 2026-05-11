@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$AdbPath,
     [string]$ApkPath,
     [string]$VideoUrl = "https://example.com/video.mp4",
-    [ValidateSet("both","direct","launcher")][string]$LaunchMode = "both"
+    [ValidateSet("both","direct","vr_entry_then_component")][string]$LaunchMode = "both"
 )
 $ErrorActionPreference = "Stop"
 function Invoke-Adb { param([string[]]$Args,[switch]$AllowFailure); $o=& $AdbPath @Args 2>&1; if(-not $AllowFailure -and $LASTEXITCODE -ne 0){ throw "adb failed: $($Args -join ' ')`n$o"}; if($null -eq $o){return ""}; return ($o -join "`n") }
@@ -31,11 +31,17 @@ function Start-SmokeLaunch {
 }
 
 $fullParts=@()
-if($LaunchMode -in @("both","direct")){ $fullParts += Start-SmokeLaunch -Mode "direct" }
-if($LaunchMode -in @("both","launcher")){ $fullParts += Start-SmokeLaunch -Mode "launcher" }
+if($LaunchMode -in @("both","direct")){
+    $fullParts += "LAUNCH_MODE direct_component"
+    $fullParts += Start-SmokeLaunch -Mode "direct"
+}
+if($LaunchMode -in @("both","vr_entry_then_component")){
+    $fullParts += "LAUNCH_MODE vr_entry_then_component"
+    $fullParts += Start-SmokeLaunch -Mode "launcher"
+}
 $full=($fullParts -join "`n")
 Set-Content (Join-Path $art "pico-openxr-log.txt") $full -Encoding UTF8
-$patterns=@("DDDVR/OpenXR","DDDVR/OpenXRLoader","DDDVR/OpenXRSession","DDDVR/OpenXRRenderer","DDDVR/OpenXRCheck","OpenXR-Loader","APxrRuntime","BD_ForwardLoader","XR_KHR_android_create_instance","setApplicationActivity","xrCreateInstance","xrGetSystem","xrGetOpenGLESGraphicsRequirementsKHR","xrCreateSession","xrCreateSwapchain","xrEnumerateSwapchainFormats","xrAcquireSwapchainImage","xrWaitSwapchainImage","xrReleaseSwapchainImage","xrWaitFrame","xrBeginFrame","xrLocateViews","xrEndFrame","fbo status","GL_FRAMEBUFFER","glErr","CURRENT_BLOCKER","AndroidRuntime","FATAL","Exception","UnsatisfiedLinkError","nativeResume called","nativePause called","nativeDestroy called","OpenXrApp::pause requested","OpenXrApp::resume requested","OpenXrApp::destroy requested","stopAndJoinThread reason","ACTIVITY_ON_START","ACTIVITY_ON_RESTART","ACTIVITY_ON_STOP","ACTIVITY_ON_NEW_INTENT","ACTIVITY_ON_USER_LEAVE_HINT","TOP_RESUMED_CHANGED","WINDOW_FOCUS_CHANGED","topResumeLossTimeout","pauseTimeout","ActivityTaskManager","WindowManager","PVR","Pico","boundary","guardian","seethrough","XR_START_STATE","XR_START_CALL_BEGIN","XR_START_CALL_END","NATIVE_START_RETURNED")
+$patterns=@("LAUNCH_MODE","DDDVR/OpenXR","DDDVR/OpenXRLoader","DDDVR/OpenXRSession","DDDVR/OpenXRRenderer","DDDVR/OpenXRCheck","OpenXR-Loader","APxrRuntime","BD_ForwardLoader","XR_KHR_android_create_instance","setApplicationActivity","xrCreateInstance","xrGetSystem","xrGetOpenGLESGraphicsRequirementsKHR","xrCreateSession","xrCreateSwapchain","xrEnumerateSwapchainFormats","xrAcquireSwapchainImage","xrWaitSwapchainImage","xrReleaseSwapchainImage","xrWaitFrame","xrBeginFrame","xrLocateViews","xrEndFrame","fbo status","GL_FRAMEBUFFER","glErr","CURRENT_BLOCKER","AndroidRuntime","FATAL","Exception","UnsatisfiedLinkError","nativeResume called","nativePause called","nativeDestroy called","OpenXrApp::pause requested","OpenXrApp::resume requested","OpenXrApp::destroy requested","stopAndJoinThread reason","ACTIVITY_ON_START","ACTIVITY_ON_RESTART","ACTIVITY_ON_STOP","ACTIVITY_ON_NEW_INTENT","ACTIVITY_ON_USER_LEAVE_HINT","TOP_RESUMED_CHANGED","WINDOW_FOCUS_CHANGED","topResumeLossTimeout","pauseTimeout","ActivityTaskManager","WindowManager","PVR","Pico","boundary","guardian","seethrough","XR_START_STATE","xrStartState","XR_START_CALL_BEGIN","XR_START_CALL_END","NATIVE_START_RETURNED")
 $re=($patterns|%{[Regex]::Escape($_)})-join "|"; ($full -split "`r?`n"|?{$_ -match $re}) -join "`n" | Set-Content (Join-Path $art "pico-openxr-filtered.txt") -Encoding UTF8
 Invoke-Adb @("shell","screencap","-p","/sdcard/pico-openxr.png") -AllowFailure|Out-Null; Invoke-Adb @("pull","/sdcard/pico-openxr.png",(Join-Path $art "pico-openxr.png")) -AllowFailure|Out-Null
 $checks=[ordered]@{

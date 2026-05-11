@@ -26,7 +26,7 @@
         <item name="android:windowIsFloating">false</item>
     </style>
     
-    <style name="Theme.App.OpenXrFullscreen" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.App.OpenXrFullscreen" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowBackground">@android:color/black</item>
     </style>

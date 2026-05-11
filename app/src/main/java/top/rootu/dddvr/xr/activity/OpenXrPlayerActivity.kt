@@ -106,6 +106,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     private fun logLifecycle(event: String) {
         Log.i(TAG, "$event initialized=$initialized playerInitialized=$playerInitialized smokeOnly=$smokeOnly xrStartState=$xrStartState xrStartScheduled=$xrStartScheduled resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus started=$started destroyed=$destroyed stopped=$stopped pausedBeforeXrStart=$pausedBeforeXrStart isFinishing=$isFinishing isDestroyed=$isDestroyed attempt=$xrStartAttempt notResumedRetryCount=$notResumedRetryCount")
+        Log.i(TAG, "XR_START_STATE event=$event xrStartState=$xrStartState")
     }
 
     override fun onResume() {
