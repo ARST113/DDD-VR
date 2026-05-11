@@ -94,14 +94,22 @@ void OpenXrApp::loop() {
                 XR_LOGI("DDDVR/OpenXR", "waiting READY state=%d elapsed=%lld running=%d initialized=%d sessionRunning=%d", session_.currentState(), (long long)elapsed, running_ ? 1 : 0, initialized_ ? 1 : 0, sessionRunning_ ? 1 : 0);
                 if (session_.currentState() == XR_SESSION_STATE_IDLE && elapsed >= 12) {
                     XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER SESSION_STUCK_IDLE_AFTER_SWAPCHAIN");
+                    XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER XR_SESSION_READY_EVENT_NOT_RECEIVED");
+                    XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER XR_READY_NOT_RECEIVED");
+                }
+                if (elapsed >= 8 && !sessionRunning_ && session_.currentState() != XR_SESSION_STATE_READY) {
+                    XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER XR_SESSION_READY_EVENT_NOT_RECEIVED state=%d", session_.currentState());
+                }
+                if (elapsed >= 8 && (session_.currentState() == XR_SESSION_STATE_VISIBLE || session_.currentState() == XR_SESSION_STATE_SYNCHRONIZED)) {
+                    XR_LOGE("DDDVR/OpenXR", "CURRENT_BLOCKER XR_VISIBILITY_CHANGED_TO_FALSE state=%d", session_.currentState());
                 }
                 lastWaitLog_ = now;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-        XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; XrResult wr = xrWaitFrame(session_.session(), &wi, &fs); if (frameCounter < 10 || frameCounter % 120 == 0 || wr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrWaitFrame result=%d", wr); if (wr != XR_SUCCESS) continue;
-        XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; XrResult br = xrBeginFrame(session_.session(), &bi); if (frameCounter < 10 || frameCounter % 120 == 0 || br != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrBeginFrame result=%d", br); if (br != XR_SUCCESS) continue;
+        XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrWaitFrame"); XrResult wr = xrWaitFrame(session_.session(), &wi, &fs); if (frameCounter < 10 || frameCounter % 120 == 0 || wr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrWaitFrame result=%d", wr); if (wr != XR_SUCCESS) continue;
+        XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrBeginFrame"); XrResult br = xrBeginFrame(session_.session(), &bi); if (frameCounter < 10 || frameCounter % 120 == 0 || br != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrBeginFrame result=%d", br); if (br != XR_SUCCESS) continue;
         XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime = fs.predictedDisplayTime; li.space = session_.appSpace(); XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count = 0; XrResult lr = xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); if (frameCounter < 10 || frameCounter % 120 == 0 || lr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrLocateViews result=%d", lr);
         bool acquired = false; bool fboOk = false;
         if (lr == XR_SUCCESS && swapchain_.acquireImage()) { acquired = true; glBindFramebuffer(GL_FRAMEBUFFER, fbo); fboOk = true; for (int eye=0; eye<2; ++eye){ auto pre=glGetError(); glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(),0,eye); auto fb=glCheckFramebufferStatus(GL_FRAMEBUFFER); auto post=glGetError(); if (frameCounter < 10 || frameCounter % 120 == 0 || fb!=GL_FRAMEBUFFER_COMPLETE || post!=GL_NO_ERROR) XR_LOGI("DDDVR/OpenXRRenderer","eye=%d imageArrayIndex=%d tex=%u viewport=%dx%d swap=%dx%d fbo status=0x%x glErrPre=0x%x glErrPost=0x%x",eye,eye,swapchain_.activeColorTexture(),swapchain_.width(),swapchain_.height(),swapchain_.width(),swapchain_.height(),fb,pre,post); if (fb==GL_FRAMEBUFFER_COMPLETE && !fboOkSeen_){ XR_LOGI("DDDVR/OpenXRCheck", "FBO_OK"); fboOkSeen_=true; }
@@ -112,7 +120,8 @@ void OpenXrApp::loop() {
         if (acquired) {
             swapchain_.releaseImage();
         }
-        XrResult er = xrEndFrame(session_.session(), &ei); if (frameCounter < 10 || frameCounter % 120 == 0 || er != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrEndFrame result=%d", er);
+        XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrEndFrame");
+        XrResult er = xrEndFrame(session_.session(), &ei); if (frameCounter < 10 || frameCounter % 120 == 0 || er != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrEndFrame result=%d", er);
         if (er == XR_SUCCESS && !firstFrameSubmitted_) {
             XR_LOGI("DDDVR/OpenXRCheck", "FRAME_LOOP_OK");
             firstFrameSubmitted_ = true;
