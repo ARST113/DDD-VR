@@ -9,8 +9,11 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
     <uses-feature
-        android:glEsVersion="0x00020000"
+        android:glEsVersion="0x00030000"
         android:required="true" />
+    <uses-feature
+        android:name="android.hardware.vr.headtracking"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Старое разрешение только для Android 12 и ниже -->
@@ -392,8 +395,11 @@
         <activity
             android:name=".xr.activity.OpenXrPlayerActivity"
             android:exported="true"
+            android:theme="@style/Theme.App.OpenXrFullscreen"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation" />
+            android:resizeableActivity="false"
+            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density" />
 
     </application>
 
