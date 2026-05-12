@@ -13,9 +13,6 @@
         android:required="true" />
     <uses-feature
         android:name="android.hardware.vr.headtracking"
-        android:required="true" />
-    <uses-feature
-        android:name="android.hardware.vr.headtracking"
         android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
