@@ -35,9 +35,13 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var destroyed = false
     private var resumed = false
     private var hasWindowFocus = false
+    private var started = false
+    private var stopped = false
+    private var topResumed = false
     private var pausedBeforeXrStart = false
     private var xrStartAttempt = 0
     private var notResumedRetryCount = 0
+    private var xrStartState = XrStartState.NOT_REQUESTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,11 +66,57 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         Log.i(TAG, "ACTIVITY_ON_CREATE_END")
     }
 
+
+    override fun onStart() {
+        super.onStart()
+        started = true
+        stopped = false
+        logLifecycle("ACTIVITY_ON_START")
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        logLifecycle("ACTIVITY_ON_RESTART")
+    }
+
+    override fun onStop() {
+        logLifecycle("ACTIVITY_ON_STOP")
+        stopped = true
+        started = false
+        topResumed = false
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        logLifecycle("ACTIVITY_ON_NEW_INTENT")
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        logLifecycle("ACTIVITY_ON_USER_LEAVE_HINT")
+    }
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        topResumed = isTopResumedActivity
+        if (initialized && xrStartState == XrStartState.STARTED && !isTopResumedActivity) {
+            Log.e(TAG, "CURRENT_BLOCKER ACTIVITY_LOST_TOP_RESUMED_AFTER_SWAPCHAIN")
+        }
+        logLifecycle("TOP_RESUMED_CHANGED isTopResumed=$isTopResumedActivity")
+    }
+
+    private fun logLifecycle(event: String) {
+        Log.i(TAG, "$event initialized=$initialized playerInitialized=$playerInitialized smokeOnly=$smokeOnly xrStartState=$xrStartState xrStartScheduled=$xrStartScheduled resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus started=$started destroyed=$destroyed stopped=$stopped pausedBeforeXrStart=$pausedBeforeXrStart isFinishing=$isFinishing isDestroyed=$isDestroyed attempt=$xrStartAttempt notResumedRetryCount=$notResumedRetryCount")
+        Log.i(TAG, "XR_START_STATE event=$event xrStartState=$xrStartState")
+    }
+
     override fun onResume() {
         super.onResume()
         resumed = true
         notResumedRetryCount = 0
-        Log.i(TAG, "ACTIVITY_ON_RESUME initialized=$initialized scheduled=$xrStartScheduled pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
+        logLifecycle("ACTIVITY_ON_RESUME")
         if (!::bridge.isInitialized) {
             Log.w(TAG, "ACTIVITY_ON_RESUME bridge not initialized")
             return
@@ -76,29 +126,34 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge", it) }
             schedulePlayerStart("resume_initialized")
         } else {
-            scheduleOpenXrStart("onResume", XR_START_DELAY_MS)
+            scheduleOpenXrStart("onResume_first", FIRST_XR_START_DELAY_MS)
         }
     }
 
     override fun onPostResume() {
         super.onPostResume()
-        Log.i(TAG, "ACTIVITY_ON_POST_RESUME initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed focus=$hasWindowFocus")
+        logLifecycle("ACTIVITY_ON_POST_RESUME")
         if (!initialized) {
-            scheduleOpenXrStart("onPostResume", XR_START_DELAY_MS)
+            scheduleOpenXrStart("onPostResume", XR_RETRY_DELAY_MS)
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         hasWindowFocus = hasFocus
-        Log.i(TAG, "WINDOW_FOCUS_CHANGED hasFocus=$hasFocus initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed")
+        logLifecycle("WINDOW_FOCUS_CHANGED hasFocus=$hasFocus")
         if (hasFocus && resumed && !initialized) {
-            scheduleOpenXrStart("windowFocus", XR_START_DELAY_MS)
+            scheduleOpenXrStart("windowFocus", XR_RETRY_DELAY_MS)
         }
     }
 
     override fun onPause() {
-        Log.i(TAG, "ACTIVITY_ON_PAUSE initialized=$initialized scheduled=$xrStartScheduled resumed=$resumed")
+        super.onPause()
+        logLifecycle("ACTIVITY_ON_PAUSE")
+        if (initialized && xrStartState == XrStartState.STARTED) {
+            Log.e(TAG, "CURRENT_STATE SEETHROUGH_OR_GUARDIAN_STOLE_FOCUS")
+            Log.e(TAG, "CURRENT_BLOCKER SEETHROUGH_SETTINGS_STOLE_FOCUS")
+        }
         resumed = false
         hasWindowFocus = false
 
@@ -123,11 +178,15 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
         mainHandler.removeCallbacks(playerStartRunnable)
         playerStartScheduled = false
-        super.onPause()
+        if (!isFinishing && !isDestroyed) {
+            Log.i(TAG, "ACTIVITY_PAUSE_NON_FATAL keep OpenXR bridge alive")
+        } else {
+            Log.i(TAG, "ACTIVITY_PAUSE_FINISHING_OR_DESTROYING")
+        }
     }
 
     override fun onDestroy() {
-        Log.i(TAG, "ACTIVITY_ON_DESTROY initialized=$initialized scheduled=$xrStartScheduled playerInitialized=$playerInitialized")
+        logLifecycle("ACTIVITY_ON_DESTROY")
         destroyed = true
         resumed = false
         mainHandler.removeCallbacks(startOpenXrRunnable)
@@ -171,8 +230,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
         xrStartScheduled = true
+        xrStartState = XrStartState.SCHEDULED
         Log.i(TAG, "XR_START_SCHEDULED reason=$reason delayMs=$delayMs attempt=${xrStartAttempt + 1}")
-        mainHandler.postDelayed(startOpenXrRunnable, delayMs)
+        if (delayMs == 0L) mainHandler.post(startOpenXrRunnable) else mainHandler.postDelayed(startOpenXrRunnable, delayMs)
     }
 
     private fun startOpenXrFromScheduledState() {
@@ -193,6 +253,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
         if (!resumed) {
+            xrStartState = XrStartState.PAUSED_BEFORE_START
             notResumedRetryCount += 1
             Log.w(TAG, "XR_START_EXECUTE_SKIPPED_NOT_RESUMED retry=$notResumedRetryCount pausedBeforeStart=$pausedBeforeXrStart")
             if (notResumedRetryCount < MAX_NOT_RESUMED_RETRIES) {
@@ -205,6 +266,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
         notResumedRetryCount = 0
         xrStartAttempt += 1
+        xrStartState = XrStartState.STARTING
         Log.i(TAG, "XR_START_EXECUTE attempt=$xrStartAttempt pausedBeforeStart=$pausedBeforeXrStart focus=$hasWindowFocus")
         Log.i(TAG, "XR_START_CALL_BEGIN")
         val startOk = runCatching { bridge.start() }
@@ -213,11 +275,13 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         Log.i(TAG, "XR_START_CALL_END startOk=$startOk")
         Log.i(TAG, "NATIVE_START_RETURNED startOk=$startOk")
         if (!startOk) {
+            xrStartState = XrStartState.FAILED
             Log.e(TAG, "OpenXR bridge start failed (null/invalid native handle)")
             finish()
             return
         }
         initialized = true
+        xrStartState = XrStartState.STARTED
         pausedBeforeXrStart = false
         runCatching { bridge.onResume() }
             .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge after start", it) }
@@ -259,6 +323,15 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         Log.i(TAG, "PLAYER_START_END")
     }
 
+    enum class XrStartState {
+        NOT_REQUESTED,
+        SCHEDULED,
+        STARTING,
+        STARTED,
+        PAUSED_BEFORE_START,
+        FAILED
+    }
+
     override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }
     override fun onSeekBy(deltaMs: Long) { if (!smokeOnly && playerInitialized) playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
@@ -266,7 +339,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     companion object {
         private const val TAG = "DDDVR/OpenXR"
-        private const val XR_START_DELAY_MS = 300L
+        private const val FIRST_XR_START_DELAY_MS = 0L
         private const val XR_RETRY_DELAY_MS = 500L
         private const val PLAYER_START_DELAY_MS = 200L
         private const val MAX_NOT_RESUMED_RETRIES = 5

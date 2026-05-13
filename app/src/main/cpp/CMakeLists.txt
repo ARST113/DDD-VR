@@ -24,6 +24,9 @@ endif()
 if(NOT TARGET openxr_loader)
     message(FATAL_ERROR "openxr_loader target is required but was not created from OpenXR SDK")
 endif()
+set(NATIVE_APP_GLUE_DIR "${ANDROID_NDK}/sources/android/native_app_glue")
+add_library(native_app_glue STATIC "${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c")
+target_include_directories(native_app_glue PUBLIC "${NATIVE_APP_GLUE_DIR}")
 
 add_library(dddvr_openxr SHARED
     jni/JniBridge.cpp
@@ -55,3 +58,20 @@ target_link_libraries(dddvr_openxr
     GLESv3
     openxr_loader
 )
+
+add_library(dddvr_openxr_native_smoke SHARED
+    native/OpenXrNativeSmokeMain.cpp
+    openxr/OpenXrApp.cpp
+    openxr/OpenXrLoader.cpp
+    openxr/OpenXrSession.cpp
+    openxr/OpenXrSwapchain.cpp
+    openxr/OpenXrRenderer.cpp
+    openxr/OpenXrInput.cpp
+    gl/GlProgram.cpp
+    gl/CinemaScreenRenderer.cpp
+    video/ExternalOesVideoTexture.cpp
+)
+target_compile_features(dddvr_openxr_native_smoke PRIVATE cxx_std_17)
+target_compile_definitions(dddvr_openxr_native_smoke PRIVATE DDDVR_HAS_OPENXR=1 XR_USE_PLATFORM_ANDROID XR_USE_GRAPHICS_API_OPENGL_ES)
+target_include_directories(dddvr_openxr_native_smoke PRIVATE "${OPENXR_INCLUDE_DIR}")
+target_link_libraries(dddvr_openxr_native_smoke android log EGL GLESv3 native_app_glue openxr_loader)

@@ -25,6 +25,11 @@
     <style name="Theme.App.SideMenuDialog" parent="Theme.App.Dialog">
         <item name="android:windowIsFloating">false</item>
     </style>
+    
+    <style name="Theme.App.OpenXrFullscreen" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 
     <style name="PlayerControlButton">
         <item name="android:layout_width">48dp</item>
