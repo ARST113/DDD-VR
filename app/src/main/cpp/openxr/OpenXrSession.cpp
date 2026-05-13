@@ -52,19 +52,20 @@ bool OpenXrSession::prepareGraphics() {
     return true;
 }
 
-bool OpenXrSession::createSession() { XrGraphicsBindingOpenGLESAndroidKHR gl{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR}; gl.display = eglDisplay_; gl.config = eglConfig_; gl.context = eglContext_; XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO}; sci.next = &gl; sci.systemId = systemId_; XrResult r = xrCreateSession(instance_, &sci, &session_); XR_LOGI("DDDVR/OpenXRSession", "xrCreateSession result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "SESSION_FAIL result=%d", r); lastError_ = "xrCreateSession failed: " + std::to_string(r); return false; } static bool sessionOkLogged=false; if(!sessionOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "SESSION_OK"); sessionOkLogged=true; } return true; }
-bool OpenXrSession::createReferenceSpace() { XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w = 1.f; XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); XR_LOGI("DDDVR/OpenXRSession", "xrCreateReferenceSpace result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "REFERENCE_SPACE_FAIL result=%d", r); lastError_ = "xrCreateReferenceSpace failed: " + std::to_string(r); return false; } static bool refOkLogged=false; if(!refOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "REFERENCE_SPACE_OK"); refOkLogged=true; } return true; }
-bool OpenXrSession::begin() { XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; XrResult r = xrBeginSession(session_, &bi); XR_LOGI("DDDVR/OpenXRSession", "xrBeginSession result=%d", r); return r == XR_SUCCESS; }
-bool OpenXrSession::end() { XrResult r = xrEndSession(session_); XR_LOGI("DDDVR/OpenXRSession", "xrEndSession result=%d", r); return r == XR_SUCCESS; }
+bool OpenXrSession::createSession() { XrGraphicsBindingOpenGLESAndroidKHR gl{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR}; gl.display = eglDisplay_; gl.config = eglConfig_; gl.context = eglContext_; XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO}; sci.next = &gl; sci.systemId = systemId_; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrCreateSession"); XrResult r = xrCreateSession(instance_, &sci, &session_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrCreateSession result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "SESSION_FAIL result=%d", r); lastError_ = "xrCreateSession failed: " + std::to_string(r); return false; } static bool sessionOkLogged=false; if(!sessionOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "SESSION_OK"); sessionOkLogged=true; } return true; }
+bool OpenXrSession::createReferenceSpace() { XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w = 1.f; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrCreateReferenceSpace"); XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrCreateReferenceSpace result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "REFERENCE_SPACE_FAIL result=%d", r); lastError_ = "xrCreateReferenceSpace failed: " + std::to_string(r); return false; } static bool refOkLogged=false; if(!refOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "REFERENCE_SPACE_OK"); refOkLogged=true; } return true; }
+bool OpenXrSession::begin() { XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrBeginSession state=%s", sessionStateToString(state_)); XrResult r = xrBeginSession(session_, &bi); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrBeginSession result=%d", r); return r == XR_SUCCESS; }
+bool OpenXrSession::end() { XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrEndSession"); XrResult r = xrEndSession(session_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrEndSession result=%d", r); return r == XR_SUCCESS; }
 void OpenXrSession::pollEvents() {
     if (instance_ == XR_NULL_HANDLE) return;
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
-        XR_LOGI("DDDVR/OpenXRSession", "xrPollEvent: type=%d", ev.type);
+        XR_LOGI("DDDVR/OpenXRSession", "XR_EVENT xrPollEvent type=%d", ev.type);
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             const auto* changed = reinterpret_cast<XrEventDataSessionStateChanged*>(&ev);
+            const XrSessionState oldState = state_;
             state_ = changed->state;
-            XR_LOGI("DDDVR/OpenXRSession", "XrEventDataSessionStateChanged state=%s", sessionStateToString(state_));
+            XR_LOGI("DDDVR/OpenXRSession", "XR_EVENT SESSION_STATE_CHANGED old=%s new=%s time=%lld", sessionStateToString(oldState), sessionStateToString(state_), (long long)changed->time);
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
