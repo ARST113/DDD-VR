@@ -148,8 +148,10 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     }
 
     override fun onPause() {
+        super.onPause()
         logLifecycle("ACTIVITY_ON_PAUSE")
         if (initialized && xrStartState == XrStartState.STARTED) {
+            Log.e(TAG, "CURRENT_STATE SEETHROUGH_OR_GUARDIAN_STOLE_FOCUS")
             Log.e(TAG, "CURRENT_BLOCKER SEETHROUGH_SETTINGS_STOLE_FOCUS")
         }
         resumed = false
@@ -176,7 +178,11 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
         mainHandler.removeCallbacks(playerStartRunnable)
         playerStartScheduled = false
-        super.onPause()
+        if (!isFinishing && !isDestroyed) {
+            Log.i(TAG, "ACTIVITY_PAUSE_NON_FATAL keep OpenXR bridge alive")
+        } else {
+            Log.i(TAG, "ACTIVITY_PAUSE_FINISHING_OR_DESTROYING")
+        }
     }
 
     override fun onDestroy() {

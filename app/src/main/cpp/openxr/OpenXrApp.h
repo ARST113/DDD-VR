@@ -42,6 +42,14 @@ private:
     bool initDone_ = false;
     bool initOk_ = false;
     std::atomic<bool> firstFrameSubmitted_{false};
+    std::atomic<bool> exitRequested_{false};
+    std::atomic<bool> restartRequested_{false};
+    std::atomic<bool> androidPaused_{false};
+    std::atomic<bool> stoppedBySeethroughOrFocusLoss_{false};
+    uint64_t frameCount_{0};
+    uint64_t frameCountBeforeStop_{0};
+    uint64_t beginSessionCount_{0};
+    uint64_t endSessionCount_{0};
     std::chrono::steady_clock::time_point startTime_{};
     std::chrono::steady_clock::time_point lastWaitLog_{};
     std::atomic<bool> fboOkSeen_{false};
