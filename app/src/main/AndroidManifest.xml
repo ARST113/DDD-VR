@@ -13,7 +13,7 @@
         android:required="true" />
     <uses-feature
         android:name="android.hardware.vr.headtracking"
-        android:required="false" />
+        android:required="true" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Старое разрешение только для Android 12 и ниже -->

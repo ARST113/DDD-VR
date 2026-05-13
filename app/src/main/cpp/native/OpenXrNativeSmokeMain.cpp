@@ -6,7 +6,6 @@
 #include "../util/XrLog.h"
 
 void android_main(android_app* app) {
-    app_dummy();
     XR_LOGI("DDDVR/OpenXRNativeSmoke", "NATIVE_SMOKE_ANDROID_MAIN_BEGIN app=%p", app);
     if (!app || !app->activity) {
         XR_LOGE("DDDVR/OpenXRNativeSmoke", "NATIVE_SMOKE_NO_ACTIVITY");
