@@ -13,13 +13,15 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
+import top.rootu.dddvr.vr.stereo.StereoInputMode
 
 class VrIntentParserTest {
 
     private fun mockedIntent(
         stringExtras: Map<String, String> = emptyMap(),
         boolExtras: Map<String, Boolean> = emptyMap(),
-        rawExtras: Map<String, Any> = emptyMap()
+        rawExtras: Map<String, Any> = emptyMap(),
+        uriLastPathSegment: String? = null
     ): Intent {
         val intent = mock(Intent::class.java)
         val uri = mock(Uri::class.java)
@@ -32,6 +34,7 @@ class VrIntentParserTest {
 
         `when`(intent.data).thenReturn(uri)
         `when`(intent.extras).thenReturn(extras)
+        `when`(uri.lastPathSegment).thenReturn(uriLastPathSegment)
         `when`(intent.hasExtra(anyString())).thenAnswer { allExtras.containsKey(it.getArgument(0)) }
         `when`(intent.getStringExtra(anyString())).thenAnswer { allExtras[it.getArgument<String>(0)] as? String }
         `when`(intent.getLongExtra(anyString(), anyLong())).thenAnswer {
@@ -107,5 +110,25 @@ class VrIntentParserTest {
         requireNotNull(parsed)
         assertTrue(parsed.hasStereoLayoutExtra)
         assertEquals(StereoLayout.MONO, parsed.vrConfig.stereoLayout)
+    }
+
+    @Test
+    fun `infers over under stereo mode from filename`() {
+        val intent = mockedIntent(uriLastPathSegment = "Avatar 2 (2022) 3D-hOU.mkv")
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoInputMode.OU, parsed.stereoInputMode)
+    }
+
+    @Test
+    fun `infers oubs stereo mode from filename`() {
+        val intent = mockedIntent(uriLastPathSegment = "Movie.3D.OUBS.mkv")
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoInputMode.OU, parsed.stereoInputMode)
     }
 }

@@ -13,6 +13,7 @@ class FlatProjection : Projection(ProjectionType.FLAT) {
     private val positionHandle: Int
     private val uvHandle: Int
     private val samplerHandle: Int
+    private val texMatrixHandle: Int
     private val uOffsetHandle: Int
     private val vOffsetHandle: Int
     private val uScaleHandle: Int
@@ -32,6 +33,7 @@ class FlatProjection : Projection(ProjectionType.FLAT) {
         positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
         uvHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
         samplerHandle = GLES20.glGetUniformLocation(program, "uTexture")
+        texMatrixHandle = GLES20.glGetUniformLocation(program, "uTexMatrix")
         uOffsetHandle = GLES20.glGetUniformLocation(program, "uOffset")
         vOffsetHandle = GLES20.glGetUniformLocation(program, "vOffset")
         uScaleHandle = GLES20.glGetUniformLocation(program, "uScale")
@@ -50,6 +52,7 @@ class FlatProjection : Projection(ProjectionType.FLAT) {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture.textureId)
         GLES20.glUniform1i(samplerHandle, 0)
+        GLES20.glUniformMatrix4fv(texMatrixHandle, 1, false, texture.transformMatrix, 0)
 
         val t = stereoMapper.getUvTransform(eye)
         GLES20.glUniform1f(uOffsetHandle, t.uOffset)
@@ -86,6 +89,6 @@ class FlatProjection : Projection(ProjectionType.FLAT) {
 
     private companion object {
         const val VS = "attribute vec2 aPosition;attribute vec2 aTexCoord;varying vec2 vTexCoord;void main(){gl_Position=vec4(aPosition,0.0,1.0);vTexCoord=aTexCoord;}"
-        const val FS = "#extension GL_OES_EGL_image_external : require\nprecision mediump float;varying vec2 vTexCoord;uniform samplerExternalOES uTexture;uniform float uOffset;uniform float vOffset;uniform float uScale;uniform float vScale;void main(){vec2 uv=vec2(vTexCoord.x*uScale+uOffset,vTexCoord.y*vScale+vOffset);gl_FragColor=texture2D(uTexture,uv);}"
+        const val FS = "#extension GL_OES_EGL_image_external : require\nprecision mediump float;varying vec2 vTexCoord;uniform samplerExternalOES uTexture;uniform mat4 uTexMatrix;uniform float uOffset;uniform float vOffset;uniform float uScale;uniform float vScale;void main(){vec2 mapped=vec2(vTexCoord.x*uScale+uOffset,vTexCoord.y*vScale+vOffset);vec2 uv=(uTexMatrix*vec4(mapped,0.0,1.0)).xy;gl_FragColor=texture2D(uTexture,uv);}"
     }
 }

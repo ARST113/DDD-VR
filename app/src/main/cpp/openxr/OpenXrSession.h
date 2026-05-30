@@ -20,6 +20,7 @@ public:
     bool hasInstance() const { return instance_ != XR_NULL_HANDLE; }
     bool isInitialized() const { return instance_ != XR_NULL_HANDLE && systemId_ != XR_NULL_SYSTEM_ID; }
     const std::string& lastError() const { return lastError_; }
+    XrInstance instance() const { return instance_; }
     XrSession session() const { return session_; }
     XrSpace appSpace() const { return appSpace_; }
     uint32_t recommendedWidth() const { return recWidth_; }

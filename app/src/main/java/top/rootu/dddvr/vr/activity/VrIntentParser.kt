@@ -3,6 +3,8 @@ package top.rootu.dddvr.vr.activity
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import top.rootu.dddvr.model.StereoInputType
+import top.rootu.dddvr.utils.StereoTypeDetector
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
 import top.rootu.dddvr.vr.model.StereoPacking
@@ -37,6 +39,7 @@ object VrIntentParser {
             "sbs_reversed" -> StereoInputMode.SBS_REVERSED
             "ou" -> StereoInputMode.OU
             "ou_reversed" -> StereoInputMode.OU_REVERSED
+            null -> inferStereoInputMode(uri)
             else -> StereoInputMode.MONO
         }
         val projection = when (intent.getStringExtra(EXTRA_PROJECTION)?.lowercase()) {
@@ -83,5 +86,13 @@ object VrIntentParser {
             hasStereoLayoutExtra = hasStereoLayoutExtra,
             hasVrProjectionExtra = hasVrProjectionExtra
         )
+    }
+
+    private fun inferStereoInputMode(uri: Uri): StereoInputMode {
+        return when (StereoTypeDetector.detect(format = null, uri = uri)) {
+            StereoInputType.SIDE_BY_SIDE -> StereoInputMode.SBS
+            StereoInputType.TOP_BOTTOM -> StereoInputMode.OU
+            else -> StereoInputMode.MONO
+        }
     }
 }

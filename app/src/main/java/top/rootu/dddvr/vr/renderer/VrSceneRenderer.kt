@@ -4,6 +4,7 @@ import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
+import android.util.Log
 import android.view.Surface
 import top.rootu.dddvr.vr.camera.Eye
 import top.rootu.dddvr.vr.mesh.SphereMeshFactory
@@ -26,13 +27,22 @@ class VrSceneRenderer(
     private lateinit var textureSource: VideoTextureSource
     val stereoUvMapper = StereoUvMapper()
     @Volatile private var frameAvailable = false
+    @Volatile var framesAvailable: Long = 0L
+        private set
+    @Volatile var framesRendered: Long = 0L
+        private set
+    @Volatile private var videoWidth: Int = 0
+    @Volatile private var videoHeight: Int = 0
     private val headMatrix = FloatArray(16)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         val textureId = IntArray(1)
         GLES20.glGenTextures(1, textureId, 0)
         configureExternalVideoTexture(textureId[0])
         val surfaceTexture = SurfaceTexture(textureId[0])
+        applyDefaultBufferSize(surfaceTexture)
         surfaceTexture.setOnFrameAvailableListener(this)
         val surface = Surface(surfaceTexture)
         textureSource = VideoTextureSource(surfaceTexture, surface, textureId[0])
@@ -43,6 +53,7 @@ class VrSceneRenderer(
             setCurrentProjectionType(initialProjectionType)
         }
         onSurfaceReady(surface)
+        Log.i(TAG, "VR_RENDER_SURFACE_CREATED texture=${textureId[0]} surface=$surface")
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -55,6 +66,10 @@ class VrSceneRenderer(
         if (frameAvailable) {
             textureSource.updateTexImage()
             frameAvailable = false
+            framesRendered += 1
+            if (framesRendered <= FRAME_LOG_INITIAL_COUNT || framesRendered % FRAME_LOG_INTERVAL == 0L) {
+                Log.i(TAG, "VR_RENDER_FRAME_RENDERED framesAvailable=$framesAvailable framesRendered=$framesRendered")
+            }
         }
         poseProvider?.getHeadMatrix(headMatrix)
         projectionManager.setHeadMatrix(headMatrix)
@@ -64,6 +79,24 @@ class VrSceneRenderer(
 
     override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
         frameAvailable = true
+        framesAvailable += 1
+        if (framesAvailable <= FRAME_LOG_INITIAL_COUNT || framesAvailable % FRAME_LOG_INTERVAL == 0L) {
+            Log.i(TAG, "VR_RENDER_FRAME_AVAILABLE framesAvailable=$framesAvailable framesRendered=$framesRendered")
+        }
+    }
+
+    fun setVideoSize(width: Int, height: Int) {
+        val safeWidth = width.coerceAtLeast(1)
+        val safeHeight = height.coerceAtLeast(1)
+        if (videoWidth == safeWidth && videoHeight == safeHeight) return
+
+        videoWidth = safeWidth
+        videoHeight = safeHeight
+
+        if (::textureSource.isInitialized) {
+            textureSource.surfaceTexture.setDefaultBufferSize(safeWidth, safeHeight)
+            Log.i(TAG, "VR_RENDER_VIDEO_SIZE width=$safeWidth height=$safeHeight")
+        }
     }
 
     private fun configureExternalVideoTexture(textureId: Int) {
@@ -72,5 +105,20 @@ class VrSceneRenderer(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+    }
+
+    private fun applyDefaultBufferSize(surfaceTexture: SurfaceTexture) {
+        val width = videoWidth
+        val height = videoHeight
+        if (width > 0 && height > 0) {
+            surfaceTexture.setDefaultBufferSize(width, height)
+            Log.i(TAG, "VR_RENDER_APPLY_PENDING_VIDEO_SIZE width=$width height=$height")
+        }
+    }
+
+    private companion object {
+        const val TAG = "DDDVR/VrRenderer"
+        const val FRAME_LOG_INITIAL_COUNT = 3
+        const val FRAME_LOG_INTERVAL = 120L
     }
 }

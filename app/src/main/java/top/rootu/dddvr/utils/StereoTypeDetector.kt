@@ -26,9 +26,9 @@ object StereoTypeDetector {
     )
 
     // Вертикальная (Top-Bottom)
-    // ou, hou, half-ou, tb, htb (Top-Bottom), ab, abq, ba, over-under, top-bottom, вертикальная
+    // ou, hou, oubs, half-ou, tb, htb (Top-Bottom), ab, abq, ba, over-under, top-bottom, вертикальная
     private val TB_PATTERN = Pattern.compile(
-        "$B_START((half|h)?-?ou|(half|h)?-?tb|abq?|ba|over-?under|top-?bottom|вертикальная)$B_END"
+        "$B_START((half|h)?-?ou|oubs|(half|h)?-?tb|abq?|ba|over-?under|top-?bottom|вертикальная)$B_END"
     )
 
     // Чересстрочная (Interlaced)

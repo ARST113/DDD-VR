@@ -10,7 +10,8 @@ data class OpenXrPlaybackConfig(
     val screenMode: OpenXrScreenMode,
     val startPositionMs: Long,
     val screenDistanceMeters: Float = 3.5f,
-    val screenWidthMeters: Float = 4.5f
+    val screenWidthMeters: Float = 4.5f,
+    val screenCurveRadians: Float = 0.45f
 ) {
     companion object {
         fun from(request: VrPlaybackRequest): OpenXrPlaybackConfig {
@@ -28,7 +29,8 @@ data class OpenXrPlaybackConfig(
                 stereoMode = effectiveStereo,
                 swapEyes = request.vrConfig.swapEyes,
                 screenMode = mode,
-                startPositionMs = request.startPositionMs
+                startPositionMs = request.startPositionMs,
+                screenCurveRadians = if (mode == OpenXrScreenMode.CURVED) 0.65f else 0.45f
             )
         }
     }

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -16,15 +16,16 @@
         android:required="true" />
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Старое разрешение только для Android 12 и ниже -->
+    <!-- РЎС‚Р°СЂРѕРµ СЂР°Р·СЂРµС€РµРЅРёРµ С‚РѕР»СЊРєРѕ РґР»СЏ Android 12 Рё РЅРёР¶Рµ -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- Новые разрешения для Android 13+ -->
+    <!-- РќРѕРІС‹Рµ СЂР°Р·СЂРµС€РµРЅРёСЏ РґР»СЏ Android 13+ -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
 
     <application
         android:name=".App"
@@ -39,32 +40,17 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/AppTheme">
 
-                <meta-data
-            android:name="pvr.app.type"
-            android:value="vr" />
-
 <activity
             android:name=".vr.activity.VrPlayerActivity"
-            android:exported="true"
+            android:enabled="false"
+            android:exported="false"
             android:icon="@mipmap/ic_launcher"
             android:logo="@mipmap/ic_launcher"
             android:banner="@drawable/tv_banner"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation">
-
-            <!-- Точка входа для Android TV -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-            </intent-filter>
-
-            <!-- Точка входа для Телефонов/Планшетов -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- Фильтры для открытия видео -->
+            <!-- Р¤РёР»СЊС‚СЂС‹ РґР»СЏ РѕС‚РєСЂС‹С‚РёСЏ РІРёРґРµРѕ -->
 
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -353,7 +339,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Activity для настройки VR профиля (прозрачная тема) -->
+        <!-- Activity РґР»СЏ РЅР°СЃС‚СЂРѕР№РєРё VR РїСЂРѕС„РёР»СЏ (РїСЂРѕР·СЂР°С‡РЅР°СЏ С‚РµРјР°) -->
         <activity
             android:name=".ui.VrConfigActivity"
             android:theme="@style/Theme.AppCompat.DayNight.Dialog.Alert"
@@ -381,7 +367,7 @@
             android:name=".ui.CrashActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:screenOrientation="landscape"
-            android:process=":crash" /> <!-- Отдельный процесс, чтобы гарантированно запуститься -->
+            android:process=":crash" /> <!-- РћС‚РґРµР»СЊРЅС‹Р№ РїСЂРѕС†РµСЃСЃ, С‡С‚РѕР±С‹ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕ Р·Р°РїСѓСЃС‚РёС‚СЊСЃСЏ -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -397,35 +383,76 @@
             android:exported="true"
             android:theme="@style/Theme.App.OpenXrFullscreen"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
             android:resizeableActivity="false"
-            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density" />
+            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
+            <meta-data
+                android:name="pvr.app.type"
+                android:value="vr" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:scheme="ftp" />
+                <data android:scheme="rtsp" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:scheme="magnet" />
+                <data android:scheme="acestream" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:scheme="ftp" />
+                <data android:scheme="rtsp" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/sdp" />
+                <data android:mimeType="application/vnd.apple.mpegurl" />
+                <data
+                    android:mimeType="application/x-mpegURL"
+                    tools:ignore="AppLinkUrlError" />
+                <data android:mimeType="application/dash+xml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".xr.activity.OpenXrSmokeActivity"
             android:exported="true"
             android:theme="@style/Theme.App.OpenXrFullscreen"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
             android:resizeableActivity="false"
-            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density" />
+            android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
+            <meta-data
+                android:name="pvr.app.type"
+                android:value="vr" />
+        </activity>
         <activity
             android:name=".xr.activity.OpenXrNativeSmokeActivity"
             android:exported="true"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
             android:excludeFromRecents="false"
             android:resizeableActivity="false"
             android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
             <meta-data
+                android:name="pvr.app.type"
+                android:value="vr" />
+            <meta-data
                 android:name="android.app.lib_name"
                 android:value="dddvr_openxr_native_smoke" />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity>
 
     </application>
 
 </manifest>
+
