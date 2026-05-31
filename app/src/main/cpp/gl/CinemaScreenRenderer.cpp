@@ -325,3 +325,58 @@ void CinemaScreenRenderer::renderRay(
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
 }
+
+void CinemaScreenRenderer::renderCursorDot(
+    const float* mvp,
+    const float center[3],
+    const float right[3],
+    const float up[3],
+    float radiusMeters,
+    bool active
+) {
+    auto drawQuad = [&](float radius, float r, float g, float b) {
+        const float lx[3] = {
+            right[0] * radius,
+            right[1] * radius,
+            right[2] * radius
+        };
+        const float ly[3] = {
+            up[0] * radius,
+            up[1] * radius,
+            up[2] * radius
+        };
+        const GLfloat quad[] = {
+            center[0] - lx[0] - ly[0], center[1] - lx[1] - ly[1], center[2] - lx[2] - ly[2], 0.f, 0.f,
+            center[0] + lx[0] - ly[0], center[1] + lx[1] - ly[1], center[2] + lx[2] - ly[2], 1.f, 0.f,
+            center[0] - lx[0] + ly[0], center[1] - lx[1] + ly[1], center[2] - lx[2] + ly[2], 0.f, 1.f,
+            center[0] + lx[0] - ly[0], center[1] + lx[1] - ly[1], center[2] + lx[2] - ly[2], 1.f, 0.f,
+            center[0] + lx[0] + ly[0], center[1] + lx[1] + ly[1], center[2] + lx[2] + ly[2], 1.f, 1.f,
+            center[0] - lx[0] + ly[0], center[1] - lx[1] + ly[1], center[2] - lx[2] + ly[2], 0.f, 1.f,
+        };
+        static const float identity[16] = {
+            1.f, 0.f, 0.f, 0.f,
+            0.f, 1.f, 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, 0.f, 0.f, 1.f
+        };
+        glUseProgram(program_);
+        glUniformMatrix4fv(mvpLoc_, 1, GL_FALSE, mvp);
+        glUniformMatrix4fv(texMatrixLoc_, 1, GL_FALSE, identity);
+        glUniform4f(uvRectLoc_, 0.f, 0.f, 1.f, 1.f);
+        glUniform1i(hasVideoLoc_, 0);
+        glUniform3f(fallbackColorLoc_, r, g, b);
+        glBindBuffer(GL_ARRAY_BUFFER, overlayVbo_);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+    };
+
+    const float outer = active ? radiusMeters * 1.55f : radiusMeters * 1.25f;
+    drawQuad(outer, 0.10f, 0.85f, 1.0f);
+    drawQuad(radiusMeters, 0.92f, 0.97f, 1.0f);
+}

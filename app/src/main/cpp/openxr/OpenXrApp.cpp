@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace {
+#if defined(DDDVR_LEGACY_PRIMITIVE_UI)
 int hoverPriority(CinemaUiHoverTarget target) {
     switch (target) {
         case CinemaUiHoverTarget::Progress:
@@ -23,6 +24,7 @@ int hoverPriority(CinemaUiHoverTarget target) {
             return 0;
     }
 }
+#endif
 }
 
 OpenXrApp::~OpenXrApp() {
@@ -305,34 +307,60 @@ void OpenXrApp::loop() {
                 lastPointerMotionTime.time_since_epoch().count() != 0 &&
                 pointerNow - lastPointerMotionTime < std::chrono::milliseconds(1500);
             const bool raysActiveForUi = input_.shouldShowPointerRays() || showRaysForMotion;
+            bool triggerPressed[2] = {
+                input_.triggerPressed(0),
+                input_.triggerPressed(1)
+            };
             if (raysActiveForUi) {
                 renderer_.setPointerRays(pointerRays);
+                renderer_.updateUiInteraction(pointerRays, triggerPressed, true);
             } else {
                 OpenXrPointerRay hiddenRays[2]{};
                 renderer_.setPointerRays(hiddenRays);
+                renderer_.updateUiInteraction(hiddenRays, triggerPressed, false);
             }
-            CinemaUiHoverTarget hoverTarget = CinemaUiHoverTarget::None;
-            if (raysActiveForUi) {
-                for (const auto& ray : pointerRays) {
-                    if (!ray.active) continue;
-                    const CinemaUiHoverTarget rayTarget = renderer_.playerHoverTarget(ray.pose);
-                    if (hoverPriority(rayTarget) > hoverPriority(hoverTarget)) {
-                        hoverTarget = rayTarget;
-                        if (hoverTarget == CinemaUiHoverTarget::Progress) break;
+            const int uiHand = renderer_.activeUiPointerHand();
+            if (uiHand >= 0 && triggerPressed[uiHand]) {
+                input_.markTriggerConsumedByUi(uiHand);
+            }
+            OpenXrInputActionCode uiAction = OpenXrInputActionCode::None;
+            while (renderer_.consumeUiInputAction(&uiAction)) {
+                dispatchInputActionOnRenderThread(uiAction);
+            }
+            int uiProgressPermille = -1;
+            while (renderer_.consumeUiTimelineSeek(&uiProgressPermille)) {
+                if (uiHand >= 0) {
+                    input_.markTriggerConsumedByUi(uiHand);
+                    input_.markTriggerTimelineConsumed(uiHand);
+                }
+                dispatchTimelineSeekOnRenderThread(uiProgressPermille);
+            }
+#if defined(DDDVR_LEGACY_PRIMITIVE_UI)
+            {
+                CinemaUiHoverTarget hoverTarget = CinemaUiHoverTarget::None;
+                if (raysActiveForUi) {
+                    for (const auto& ray : pointerRays) {
+                        if (!ray.active) continue;
+                        const CinemaUiHoverTarget rayTarget = renderer_.playerHoverTarget(ray.pose);
+                        if (hoverPriority(rayTarget) > hoverPriority(hoverTarget)) {
+                            hoverTarget = rayTarget;
+                            if (hoverTarget == CinemaUiHoverTarget::Progress) break;
+                        }
+                    }
+                }
+                renderer_.setPlayerHoverTarget(hoverTarget);
+                if (controls.seekProgressPointerHand >= 0 && controls.seekProgressPointerHand < 2 &&
+                    pointerRays[controls.seekProgressPointerHand].active) {
+                    int progressPermille = -1;
+                    if (renderer_.seekProgressFromPointer(pointerRays[controls.seekProgressPointerHand].pose, &progressPermille)) {
+                        if (controls.seekProgressFromTrigger) {
+                            input_.markTriggerTimelineConsumed(controls.seekProgressPointerHand);
+                        }
+                        dispatchTimelineSeekOnRenderThread(progressPermille);
                     }
                 }
             }
-            renderer_.setPlayerHoverTarget(hoverTarget);
-            if (controls.seekProgressPointerHand >= 0 && controls.seekProgressPointerHand < 2 &&
-                pointerRays[controls.seekProgressPointerHand].active) {
-                int progressPermille = -1;
-                if (renderer_.seekProgressFromPointer(pointerRays[controls.seekProgressPointerHand].pose, &progressPermille)) {
-                    if (controls.seekProgressFromTrigger) {
-                        input_.markTriggerTimelineConsumed(controls.seekProgressPointerHand);
-                    }
-                    dispatchTimelineSeekOnRenderThread(progressPermille);
-                }
-            }
+#endif
             const int grabHand = input_.activeGrabHand();
             const OpenXrPointerRay* grabPose =
                 grabHand >= 0 && pointerRays[grabHand].active ? &pointerRays[grabHand] :
@@ -352,6 +380,8 @@ void OpenXrApp::loop() {
             pointerRays[0].active = false;
             pointerRays[1].active = false;
             renderer_.setPointerRays(pointerRays);
+            bool triggerPressed[2] = {false, false};
+            renderer_.updateUiInteraction(pointerRays, triggerPressed, false);
             XrPosef emptyPose{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
             renderer_.updateScreenGrab(false, emptyPose, 0.f);
         }

@@ -3,8 +3,12 @@
 #include "OpenXrInput.h"
 #include "../video/ExternalOesVideoTexture.h"
 #include "../gl/CinemaScreenRenderer.h"
+#include "../ui/VrPicoGui.h"
+#include "../ui/VrPlayerPanel.h"
+#include "../ui/VrRayInteractor.h"
 #include <GLES3/gl3.h>
 #include <atomic>
+#include <chrono>
 
 enum class OpenXrStereoMode {
     Mono,
@@ -28,6 +32,10 @@ public:
     void setVideoFrameState(const float* transformMatrix, bool hasVideo);
     void setUiState(bool visible, int progressPermille, bool playing);
     void setPointerRays(const OpenXrPointerRay rays[2]);
+    void updateUiInteraction(const OpenXrPointerRay rays[2], const bool triggerPressed[2], bool active);
+    int activeUiPointerHand() const { return activeUiPointerHand_; }
+    bool consumeUiInputAction(OpenXrInputActionCode* outAction);
+    bool consumeUiTimelineSeek(int* outProgressPermille);
     void setPlayerHoverTarget(CinemaUiHoverTarget target);
     bool updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters);
     bool seekProgressFromPointer(const XrPosef& aimPose, int* outProgressPermille);
@@ -42,11 +50,36 @@ private:
     void applyScreenPlacement();
     void updateCenterFromYawDistance();
     void clampScreenCenter();
+    VrUiPlane targetUiPlane() const;
+    VrUiPlane currentScreenPlane() const;
+    VrRayHit screenHitTest(const XrPosef& aimPose, int hand) const;
+    void updateUiPlane(float deltaSeconds);
+    void updateUiTexture();
+    VrUiPlane currentUiPlane() const;
+    void queuePlayerPanelActions();
+    void renderUiCursor(const float* mvp, const VrRayHit& hit, const VrUiPlane& plane);
     CinemaUvRect uvRectForEye(int eye) const;
     OpenXrRenderConfig config_;
     ExternalOesVideoTexture video_;
     CinemaScreenRenderer screen_;
+    VrPicoGui uiBackend_;
+    VrPlayerPanel playerPanel_;
+    VrRayInteractor rayInteractor_;
     OpenXrPointerRay pointerRays_[2];
+    VrRayHit uiRayHits_[2];
+    VrRayHit screenRayHits_[2];
+    VrRayHit activeUiHit_;
+    VrUiPlane uiPlane_;
+    bool uiPlaneInitialized_ = false;
+    int activeUiPointerHand_ = -1;
+    bool uiPrimaryPressed_ = false;
+    bool pendingUiPlayPause_ = false;
+    bool pendingUiSeekBack_ = false;
+    bool pendingUiSeekForward_ = false;
+    bool pendingUiTimelineSeek_ = false;
+    int pendingUiTimelineProgressPermille_ = 0;
+    int lastUiTimelineQueuedProgressPermille_ = -1;
+    std::chrono::steady_clock::time_point lastUiTimelineSeekQueued_{};
     float screenYawRadians_ = 0.f;
     float screenDistanceMeters_ = 3.5f;
     float screenCenterX_ = 0.f;
@@ -75,4 +108,5 @@ private:
     std::atomic<bool> uiPlaying_{false};
     int uiAutoHideFrameBudget_ = 0;
     CinemaUiHoverTarget uiHoverTarget_ = CinemaUiHoverTarget::None;
+    std::chrono::steady_clock::time_point lastUiFrameTime_{};
 };

@@ -197,6 +197,8 @@ void OpenXrInput::destroy() {
     thumbstickClickPressed_[1] = false;
     triggerConsumedByTimeline_[0] = false;
     triggerConsumedByTimeline_[1] = false;
+    triggerConsumedByUi_[0] = false;
+    triggerConsumedByUi_[1] = false;
     squeezeConsumedByMotion_[0] = false;
     squeezeConsumedByMotion_[1] = false;
     triggerPressedAt_[0] = {};
@@ -393,6 +395,7 @@ void OpenXrInput::pollTrigger() {
         if (!sourceActive) {
             triggerPressed_[hand] = false;
             triggerConsumedByTimeline_[hand] = false;
+            triggerConsumedByUi_[hand] = false;
             lastTriggerTimelineSeekEmit_[hand] = {};
             continue;
         }
@@ -400,35 +403,26 @@ void OpenXrInput::pollTrigger() {
         if (!triggerPressed_[hand] && down) {
             triggerPressed_[hand] = true;
             triggerConsumedByTimeline_[hand] = false;
+            triggerConsumedByUi_[hand] = false;
             triggerPressedAt_[hand] = now;
-            lastTriggerTimelineSeekEmit_[hand] = now;
-            pendingFrameControls_.seekProgressPointerHand = hand;
-            pendingFrameControls_.seekProgressFromTrigger = true;
+            lastTriggerTimelineSeekEmit_[hand] = {};
             lastPointerActivity_ = now;
             XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_DOWN hand=%d value=%.2f", hand, triggerValue);
-            XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_TIMELINE_SEEK hand=%d", hand);
         } else if (triggerPressed_[hand] && !down) {
-            const bool consumed = triggerConsumedByTimeline_[hand];
+            const bool consumedTimeline = triggerConsumedByTimeline_[hand];
+            const bool consumedUi = triggerConsumedByUi_[hand];
+            const bool consumed = consumedTimeline || consumedUi;
             if (!consumed && shouldEmitTriggerTap(hand, now)) {
                 emit(OpenXrInputActionCode::PlayPause);
                 lastTriggerTapEmit_[hand] = now;
             }
             triggerPressed_[hand] = false;
             triggerConsumedByTimeline_[hand] = false;
+            triggerConsumedByUi_[hand] = false;
             lastTriggerTimelineSeekEmit_[hand] = {};
             lastPointerActivity_ = now;
-            XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_UP hand=%d consumedTimeline=%d",
-                    hand, consumed ? 1 : 0);
-        } else if (triggerPressed_[hand] && down && !anyGrabPressed()) {
-            const auto lastEmit = lastTriggerTimelineSeekEmit_[hand];
-            if (lastEmit.time_since_epoch().count() == 0 ||
-                now - lastEmit >= kTimelineSeekDragInterval) {
-                lastTriggerTimelineSeekEmit_[hand] = now;
-                pendingFrameControls_.seekProgressPointerHand = hand;
-                pendingFrameControls_.seekProgressFromTrigger = true;
-                lastPointerActivity_ = now;
-                XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_TIMELINE_SEEK hand=%d", hand);
-            }
+            XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_UP hand=%d consumedTimeline=%d consumedUi=%d",
+                    hand, consumedTimeline ? 1 : 0, consumedUi ? 1 : 0);
         }
     }
 }
@@ -623,6 +617,11 @@ int OpenXrInput::activeGrabHand() const {
     return -1;
 }
 
+bool OpenXrInput::triggerPressed(int hand) const {
+    if (hand < 0 || hand >= 2) return false;
+    return triggerPressed_[hand];
+}
+
 bool OpenXrInput::shouldShowPointerRays() const {
     if (anyGrabPressed() || triggerPressed_[0] || triggerPressed_[1]) return true;
     if (lastPointerActivity_.time_since_epoch().count() == 0) return false;
@@ -640,6 +639,11 @@ void OpenXrInput::markGrabMotionConsumed() {
 void OpenXrInput::markTriggerTimelineConsumed(int hand) {
     if (hand < 0 || hand >= 2 || !triggerPressed_[hand]) return;
     triggerConsumedByTimeline_[hand] = true;
+}
+
+void OpenXrInput::markTriggerConsumedByUi(int hand) {
+    if (hand < 0 || hand >= 2 || !triggerPressed_[hand]) return;
+    triggerConsumedByUi_[hand] = true;
 }
 
 bool OpenXrInput::shouldEmitTriggerTap(int hand, std::chrono::steady_clock::time_point now) const {
