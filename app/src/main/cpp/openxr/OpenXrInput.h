@@ -45,9 +45,11 @@ public:
     OpenXrFrameControls consumeFrameControls();
     int activeGrabHand() const;
     bool anyGrabPressed() const;
+    bool triggerPressed(int hand) const;
     bool shouldShowPointerRays() const;
     void markGrabMotionConsumed();
     void markTriggerTimelineConsumed(int hand);
+    void markTriggerConsumedByUi(int hand);
     void destroy();
 
 private:
@@ -90,6 +92,7 @@ private:
     bool squeezePressed_[2]{false, false};
     bool thumbstickClickPressed_[2]{false, false};
     bool triggerConsumedByTimeline_[2]{false, false};
+    bool triggerConsumedByUi_[2]{false, false};
     bool squeezeConsumedByMotion_[2]{false, false};
     std::chrono::steady_clock::time_point triggerPressedAt_[2]{};
     std::chrono::steady_clock::time_point lastTriggerTapEmit_[2]{};

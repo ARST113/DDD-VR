@@ -22,6 +22,14 @@ constexpr float kUiProgressWidthScale = 0.74f;
 constexpr float kUiPlayButtonWidthMeters = 0.34f;
 constexpr float kUiPlayButtonHeightMeters = 0.18f;
 constexpr float kUiPlayButtonYOffsetMeters = 0.055f;
+constexpr int kImGuiUiTextureWidth = 1600;
+constexpr int kImGuiUiTextureHeight = 520;
+constexpr float kImGuiPanelWidthScale = 0.58f;
+constexpr float kImGuiPanelMaxWidthMeters = 2.85f;
+constexpr float kImGuiPanelHeightMeters = 0.48f;
+constexpr float kImGuiPanelDownScale = 0.58f;
+constexpr float kImGuiPanelForwardOffsetMeters = 0.10f;
+constexpr float kImGuiPanelFollowResponse = 14.0f;
 
 std::array<float, 16> multiply(const std::array<float, 16>& a, const std::array<float, 16>& b) {
     std::array<float, 16> out{};
@@ -132,6 +140,17 @@ bool OpenXrRenderer::initialize(const OpenXrRenderConfig& config){
     screenCurveRadians_ = config_.screenCurveRadians;
     video_.create();
     screen_.initialize(config_.screenWidthMeters, screenDistanceMeters_, screenCurveRadians_);
+    if (uiBackend_.initialize(kImGuiUiTextureWidth, kImGuiUiTextureHeight)) {
+        VrPlayerUiState state{};
+        state.visible = true;
+        state.playing = false;
+        state.title = "DDD-VR OpenXR Player";
+        state.stereoModeLabel = "ImGui test panel";
+        state.durationMs = 1000;
+        playerPanel_.setState(state);
+    } else {
+        XR_LOGE("DDDVR/OpenXRUi", "CURRENT_BLOCKER XR_UI_BACKEND_INIT_FAILED");
+    }
     XR_LOGI("DDDVR/OpenXRRenderer","renderer initialized stereo=%d swap=%d width=%.2f distance=%.2f curve=%.2f",
             (int)config_.stereoMode, config_.swapEyes ? 1 : 0,
             config_.screenWidthMeters, screenDistanceMeters_, screenCurveRadians_);
@@ -151,16 +170,125 @@ void OpenXrRenderer::setUiState(bool visible, int progressPermille, bool playing
     if (progressPermille > 1000) progressPermille = 1000;
     uiProgressPermille_.store(progressPermille);
     uiPlaying_.store(playing);
+
+    VrPlayerUiState state{};
+    state.visible = visible;
+    state.playing = playing;
+    state.title = "DDD-VR OpenXR Player";
+    state.stereoModeLabel = "ImGui backend";
+    state.positionMs = progressPermille;
+    state.durationMs = 1000;
+    state.bufferedPositionMs = progressPermille;
+    playerPanel_.setState(state);
 }
 
 void OpenXrRenderer::setPointerRays(const OpenXrPointerRay rays[2]) {
     if (rays == nullptr) {
         pointerRays_[0].active = false;
         pointerRays_[1].active = false;
+        uiRayHits_[0] = {};
+        uiRayHits_[1] = {};
+        screenRayHits_[0] = {};
+        screenRayHits_[1] = {};
+        activeUiHit_ = {};
+        activeUiPointerHand_ = -1;
         return;
     }
     pointerRays_[0] = rays[0];
     pointerRays_[1] = rays[1];
+}
+
+void OpenXrRenderer::updateUiInteraction(
+    const OpenXrPointerRay rays[2],
+    const bool triggerPressed[2],
+    bool active
+) {
+    uiRayHits_[0] = {};
+    uiRayHits_[1] = {};
+    screenRayHits_[0] = {};
+    screenRayHits_[1] = {};
+    activeUiHit_ = {};
+    activeUiPointerHand_ = -1;
+    uiPrimaryPressed_ = false;
+    if (!uiBackend_.initialized() || rays == nullptr || !active) {
+        uiBackend_.setPointerVisible(false);
+        uiBackend_.setPrimaryButton(false);
+        return;
+    }
+
+    const VrUiPlane plane = currentUiPlane();
+    for (int hand = 0; hand < 2; ++hand) {
+        if (!rays[hand].active) continue;
+        uiRayHits_[hand] = rayInteractor_.hitTest(
+            rays[hand].pose,
+            plane,
+            uiBackend_.width(),
+            uiBackend_.height(),
+            hand
+        );
+        screenRayHits_[hand] = screenHitTest(rays[hand].pose, hand);
+    }
+
+    int selectedHand = -1;
+    for (int hand = 0; hand < 2; ++hand) {
+        if (triggerPressed != nullptr && triggerPressed[hand] && uiRayHits_[hand].hit) {
+            selectedHand = hand;
+            break;
+        }
+    }
+    if (selectedHand < 0 && uiRayHits_[1].hit) selectedHand = 1;
+    if (selectedHand < 0 && uiRayHits_[0].hit) selectedHand = 0;
+
+    if (selectedHand >= 0) {
+        activeUiHit_ = uiRayHits_[selectedHand];
+        activeUiPointerHand_ = selectedHand;
+        uiPrimaryPressed_ = triggerPressed != nullptr && triggerPressed[selectedHand];
+        uiBackend_.setPointerVisible(true);
+        uiBackend_.setPointerPixel(activeUiHit_.pixelX, activeUiHit_.pixelY);
+        uiBackend_.setPrimaryButton(uiPrimaryPressed_);
+        static uint32_t pointerHitLogCount = 0;
+        pointerHitLogCount += 1;
+        if (uiPrimaryPressed_ || pointerHitLogCount <= 8 || pointerHitLogCount % 90 == 0) {
+            XR_LOGI(
+                "DDDVR/OpenXRUi",
+                "XR_UI_POINTER_HIT hand=%d x=%.1f y=%.1f pressed=%d",
+                selectedHand,
+                activeUiHit_.pixelX,
+                activeUiHit_.pixelY,
+                uiPrimaryPressed_ ? 1 : 0
+            );
+        }
+    } else {
+        uiBackend_.setPointerVisible(false);
+        uiBackend_.setPrimaryButton(false);
+    }
+}
+
+bool OpenXrRenderer::consumeUiInputAction(OpenXrInputActionCode* outAction) {
+    if (outAction == nullptr) return false;
+    if (pendingUiPlayPause_) {
+        pendingUiPlayPause_ = false;
+        *outAction = OpenXrInputActionCode::PlayPause;
+        return true;
+    }
+    if (pendingUiSeekBack_) {
+        pendingUiSeekBack_ = false;
+        *outAction = OpenXrInputActionCode::SeekBack;
+        return true;
+    }
+    if (pendingUiSeekForward_) {
+        pendingUiSeekForward_ = false;
+        *outAction = OpenXrInputActionCode::SeekForward;
+        return true;
+    }
+    return false;
+}
+
+bool OpenXrRenderer::consumeUiTimelineSeek(int* outProgressPermille) {
+    if (!pendingUiTimelineSeek_ || outProgressPermille == nullptr) return false;
+    pendingUiTimelineSeek_ = false;
+    *outProgressPermille = pendingUiTimelineProgressPermille_;
+    return true;
 }
 
 void OpenXrRenderer::setPlayerHoverTarget(CinemaUiHoverTarget target) {
@@ -463,6 +591,183 @@ void OpenXrRenderer::clampScreenCenter() {
     screenDistanceMeters_ = distance;
 }
 
+VrUiPlane OpenXrRenderer::targetUiPlane() const {
+    const float screenHeight = config_.screenWidthMeters * (9.f / 16.f);
+    const float c = std::cos(screenYawRadians_);
+    const float s = std::sin(screenYawRadians_);
+    VrUiPlane plane{};
+    plane.right = {c, 0.f, s};
+    plane.up = {0.f, 1.f, 0.f};
+    plane.normal = {-s, 0.f, c};
+    plane.center.x = screenCenterX_ + plane.normal.x * kImGuiPanelForwardOffsetMeters;
+    plane.center.y = screenCenterY_ - screenHeight * kImGuiPanelDownScale;
+    plane.center.z = screenCenterZ_ + plane.normal.z * kImGuiPanelForwardOffsetMeters;
+    plane.yawRadians = screenYawRadians_;
+    const float desiredPanelWidth = config_.screenWidthMeters * kImGuiPanelWidthScale;
+    plane.widthMeters = desiredPanelWidth < kImGuiPanelMaxWidthMeters
+        ? desiredPanelWidth
+        : kImGuiPanelMaxWidthMeters;
+    plane.heightMeters = kImGuiPanelHeightMeters;
+    return plane;
+}
+
+VrUiPlane OpenXrRenderer::currentScreenPlane() const {
+    const float c = std::cos(screenYawRadians_);
+    const float s = std::sin(screenYawRadians_);
+    VrUiPlane plane{};
+    plane.center = {screenCenterX_, screenCenterY_, screenCenterZ_};
+    plane.right = {c, 0.f, s};
+    plane.up = {0.f, 1.f, 0.f};
+    plane.normal = {-s, 0.f, c};
+    plane.yawRadians = screenYawRadians_;
+    plane.widthMeters = config_.screenWidthMeters;
+    plane.heightMeters = config_.screenWidthMeters * (9.f / 16.f);
+    return plane;
+}
+
+VrRayHit OpenXrRenderer::screenHitTest(const XrPosef& aimPose, int hand) const {
+    VrRayHit out{};
+    out.hand = hand;
+    const VrUiPlane plane = currentScreenPlane();
+    const auto direction = rotateByQuat(aimPose.orientation, 0.f, 0.f, -1.f);
+    const float directionLength = std::sqrt(
+        direction[0] * direction[0] +
+        direction[1] * direction[1] +
+        direction[2] * direction[2]
+    );
+    if (directionLength <= 0.001f) return out;
+    const float dirX = direction[0] / directionLength;
+    const float dirY = direction[1] / directionLength;
+    const float dirZ = direction[2] / directionLength;
+    const float denom =
+        dirX * plane.normal.x +
+        dirY * plane.normal.y +
+        dirZ * plane.normal.z;
+    if (std::fabs(denom) <= 0.001f) return out;
+    const float toPlaneX = plane.center.x - aimPose.position.x;
+    const float toPlaneY = plane.center.y - aimPose.position.y;
+    const float toPlaneZ = plane.center.z - aimPose.position.z;
+    const float t =
+        (toPlaneX * plane.normal.x +
+         toPlaneY * plane.normal.y +
+         toPlaneZ * plane.normal.z) / denom;
+    if (t <= 0.f) return out;
+
+    const float hitX = aimPose.position.x + dirX * t;
+    const float hitY = aimPose.position.y + dirY * t;
+    const float hitZ = aimPose.position.z + dirZ * t;
+    const float deltaX = hitX - plane.center.x;
+    const float deltaY = hitY - plane.center.y;
+    const float deltaZ = hitZ - plane.center.z;
+    const float localX =
+        deltaX * plane.right.x +
+        deltaY * plane.right.y +
+        deltaZ * plane.right.z;
+    const float localY =
+        deltaX * plane.up.x +
+        deltaY * plane.up.y +
+        deltaZ * plane.up.z;
+    if (std::fabs(localX) > plane.widthMeters * 0.5f ||
+        std::fabs(localY) > plane.heightMeters * 0.5f) {
+        return out;
+    }
+    out.hit = true;
+    out.worldX = hitX;
+    out.worldY = hitY;
+    out.worldZ = hitZ;
+    out.pixelX = (localX / plane.widthMeters + 0.5f) * static_cast<float>(kImGuiUiTextureWidth);
+    out.pixelY = (0.5f - localY / plane.heightMeters) * static_cast<float>(kImGuiUiTextureHeight);
+    return out;
+}
+
+void OpenXrRenderer::updateUiPlane(float deltaSeconds) {
+    const VrUiPlane target = targetUiPlane();
+    if (!uiPlaneInitialized_) {
+        uiPlane_ = target;
+        uiPlaneInitialized_ = true;
+        return;
+    }
+    if (deltaSeconds < 0.f) deltaSeconds = 0.f;
+    if (deltaSeconds > 0.1f) deltaSeconds = 0.1f;
+    const float response = screenGrabActive_ ? 22.0f : kImGuiPanelFollowResponse;
+    const float k = 1.f - std::exp(-deltaSeconds * response);
+    uiPlane_.center.x += (target.center.x - uiPlane_.center.x) * k;
+    uiPlane_.center.y += (target.center.y - uiPlane_.center.y) * k;
+    uiPlane_.center.z += (target.center.z - uiPlane_.center.z) * k;
+    uiPlane_.yawRadians += normalizeRadians(target.yawRadians - uiPlane_.yawRadians) * k;
+    uiPlane_.yawRadians = normalizeRadians(uiPlane_.yawRadians);
+    const float c = std::cos(uiPlane_.yawRadians);
+    const float s = std::sin(uiPlane_.yawRadians);
+    uiPlane_.right = {c, 0.f, s};
+    uiPlane_.up = {0.f, 1.f, 0.f};
+    uiPlane_.normal = {-s, 0.f, c};
+    uiPlane_.widthMeters = target.widthMeters;
+    uiPlane_.heightMeters = target.heightMeters;
+}
+
+void OpenXrRenderer::updateUiTexture() {
+    if (!uiBackend_.initialized()) return;
+    const auto now = std::chrono::steady_clock::now();
+    float deltaSeconds = 1.f / 60.f;
+    if (lastUiFrameTime_.time_since_epoch().count() != 0) {
+        deltaSeconds = std::chrono::duration<float>(now - lastUiFrameTime_).count();
+    }
+    lastUiFrameTime_ = now;
+    updateUiPlane(deltaSeconds);
+    uiBackend_.beginFrame(deltaSeconds);
+    playerPanel_.draw();
+    queuePlayerPanelActions();
+    uiBackend_.endFrame();
+}
+
+VrUiPlane OpenXrRenderer::currentUiPlane() const {
+    return uiPlaneInitialized_ ? uiPlane_ : targetUiPlane();
+}
+
+void OpenXrRenderer::queuePlayerPanelActions() {
+    if (playerPanel_.consumePlayPauseRequested()) {
+        pendingUiPlayPause_ = true;
+        XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION play_pause");
+    }
+    if (playerPanel_.consumeSeekBackRequested()) {
+        pendingUiSeekBack_ = true;
+        XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_back");
+    }
+    if (playerPanel_.consumeSeekForwardRequested()) {
+        pendingUiSeekForward_ = true;
+        XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_forward");
+    }
+    int64_t requestedPositionMs = 0;
+    if (playerPanel_.consumeTimelineSeekRequested(&requestedPositionMs)) {
+        int progressPermille = static_cast<int>(requestedPositionMs);
+        if (progressPermille < 0) progressPermille = 0;
+        if (progressPermille > 1000) progressPermille = 1000;
+        const auto now = std::chrono::steady_clock::now();
+        const bool firstSeek = lastUiTimelineSeekQueued_.time_since_epoch().count() == 0;
+        const bool timeElapsed =
+            firstSeek || now - lastUiTimelineSeekQueued_ >= std::chrono::milliseconds(90);
+        const bool movedEnough =
+            lastUiTimelineQueuedProgressPermille_ < 0 ||
+            std::abs(progressPermille - lastUiTimelineQueuedProgressPermille_) >= 4;
+        if (timeElapsed || movedEnough) {
+            pendingUiTimelineProgressPermille_ = progressPermille;
+            pendingUiTimelineSeek_ = true;
+            lastUiTimelineQueuedProgressPermille_ = progressPermille;
+            lastUiTimelineSeekQueued_ = now;
+            XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_to progress=%d", progressPermille);
+        }
+    }
+}
+
+void OpenXrRenderer::renderUiCursor(const float* mvp, const VrRayHit& hit, const VrUiPlane& plane) {
+    if (!hit.hit) return;
+    const float size = uiPrimaryPressed_ ? 0.028f : 0.020f;
+    const float center[3] = {hit.worldX, hit.worldY, hit.worldZ};
+    const float right[3] = {plane.right.x, plane.right.y, plane.right.z};
+    const float up[3] = {plane.up.x, plane.up.y, plane.up.z};
+    screen_.renderCursorDot(mvp, center, right, up, size, uiPrimaryPressed_);
+}
+
 void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& view){
     glViewport(0,0,width,height);
     glClearColor(0.f,0.f,0.f,1.f);
@@ -475,25 +780,37 @@ void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& vie
     } else {
         screen_.renderVideo(video_.id(), mvp.data(), videoTransform_, uvRectForEye(eye), hasVideoFrame_, 0.f, 0.f, 0.f);
     }
-    const bool shouldRenderUi = uiAutoHideFrameBudget_ > 0 || screenGrabActive_;
-    if (shouldRenderUi) {
-        const CinemaUiHoverTarget renderHoverTarget =
-            uiAutoHideFrameBudget_ > 0 ? uiHoverTarget_ : CinemaUiHoverTarget::None;
-        screen_.renderUiOverlay(mvp.data(), uiProgressPermille_.load(), uiPlaying_.load(), renderHoverTarget);
-        if (eye == 1 && uiAutoHideFrameBudget_ > 0 && !screenGrabActive_) {
-            uiAutoHideFrameBudget_ -= 1;
-            if (uiAutoHideFrameBudget_ == 0) {
-                uiHoverTarget_ = CinemaUiHoverTarget::None;
+#if defined(DDDVR_LEGACY_PRIMITIVE_UI)
+    {
+        const bool shouldRenderUi = uiAutoHideFrameBudget_ > 0 || screenGrabActive_;
+        if (shouldRenderUi) {
+            const CinemaUiHoverTarget renderHoverTarget =
+                uiAutoHideFrameBudget_ > 0 ? uiHoverTarget_ : CinemaUiHoverTarget::None;
+            screen_.renderUiOverlay(mvp.data(), uiProgressPermille_.load(), uiPlaying_.load(), renderHoverTarget);
+            if (eye == 1 && uiAutoHideFrameBudget_ > 0 && !screenGrabActive_) {
+                uiAutoHideFrameBudget_ -= 1;
+                if (uiAutoHideFrameBudget_ == 0) {
+                    uiHoverTarget_ = CinemaUiHoverTarget::None;
+                }
             }
         }
     }
+#else
+    if (uiVisible_.load() && uiBackend_.initialized()) {
+        if (eye == 0) {
+            updateUiTexture();
+        }
+        uiBackend_.renderPanelQuad(mvp.data(), currentUiPlane());
+    }
+#endif
     if (screenGrabActive_ || screenHighlightFrameBudget_ > 0) {
         screen_.renderGrabHighlight(mvp.data());
         if (eye == 1 && screenHighlightFrameBudget_ > 0) {
             screenHighlightFrameBudget_ -= 1;
         }
     }
-    for (const auto& ray : pointerRays_) {
+    for (int hand = 0; hand < 2; ++hand) {
+        const auto& ray = pointerRays_[hand];
         if (!ray.active) continue;
         const auto direction = rotateByQuat(ray.pose.orientation, 0.f, 0.f, -1.f);
         const float start[3] = {
@@ -501,12 +818,18 @@ void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& vie
             ray.pose.position.y,
             ray.pose.position.z
         };
+        const VrRayHit& rayHit = uiRayHits_[hand].hit ? uiRayHits_[hand] : screenRayHits_[hand];
         const float end[3] = {
-            start[0] + direction[0] * 8.f,
-            start[1] + direction[1] * 8.f,
-            start[2] + direction[2] * 8.f
+            rayHit.hit ? rayHit.worldX : start[0] + direction[0] * 8.f,
+            rayHit.hit ? rayHit.worldY : start[1] + direction[1] * 8.f,
+            rayHit.hit ? rayHit.worldZ : start[2] + direction[2] * 8.f
         };
         screen_.renderRay(mvp.data(), start, end, 0.1f, 0.85f, 1.0f);
+        if (uiRayHits_[hand].hit) {
+            renderUiCursor(mvp.data(), uiRayHits_[hand], currentUiPlane());
+        } else if (screenRayHits_[hand].hit) {
+            renderUiCursor(mvp.data(), screenRayHits_[hand], currentScreenPlane());
+        }
     }
 }
 

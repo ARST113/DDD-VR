@@ -28,6 +28,20 @@ set(NATIVE_APP_GLUE_DIR "${ANDROID_NDK}/sources/android/native_app_glue")
 add_library(native_app_glue STATIC "${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c")
 target_include_directories(native_app_glue PUBLIC "${NATIVE_APP_GLUE_DIR}")
 
+set(DDDVR_IMGUI_SOURCES
+    third/imgui/imgui.cpp
+    third/imgui/imgui_draw.cpp
+    third/imgui/imgui_tables.cpp
+    third/imgui/imgui_widgets.cpp
+)
+
+set(DDDVR_OPENXR_UI_SOURCES
+    ui/VrPicoGuiBase.cpp
+    ui/VrPicoGui.cpp
+    ui/VrPlayerPanel.cpp
+    ui/VrRayInteractor.cpp
+)
+
 add_library(dddvr_openxr SHARED
     jni/JniBridge.cpp
     openxr/OpenXrApp.cpp
@@ -39,6 +53,8 @@ add_library(dddvr_openxr SHARED
     gl/GlProgram.cpp
     gl/CinemaScreenRenderer.cpp
     video/ExternalOesVideoTexture.cpp
+    ${DDDVR_IMGUI_SOURCES}
+    ${DDDVR_OPENXR_UI_SOURCES}
 )
 
 target_compile_features(dddvr_openxr PRIVATE cxx_std_17)
@@ -49,7 +65,12 @@ target_compile_definitions(
         XR_USE_PLATFORM_ANDROID
         XR_USE_GRAPHICS_API_OPENGL_ES
 )
-target_include_directories(dddvr_openxr PRIVATE "${OPENXR_INCLUDE_DIR}")
+target_include_directories(
+    dddvr_openxr
+    PRIVATE
+        "${OPENXR_INCLUDE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third/imgui"
+)
 
 target_link_libraries(dddvr_openxr
     android
@@ -70,8 +91,15 @@ add_library(dddvr_openxr_native_smoke SHARED
     gl/GlProgram.cpp
     gl/CinemaScreenRenderer.cpp
     video/ExternalOesVideoTexture.cpp
+    ${DDDVR_IMGUI_SOURCES}
+    ${DDDVR_OPENXR_UI_SOURCES}
 )
 target_compile_features(dddvr_openxr_native_smoke PRIVATE cxx_std_17)
 target_compile_definitions(dddvr_openxr_native_smoke PRIVATE DDDVR_HAS_OPENXR=1 XR_USE_PLATFORM_ANDROID XR_USE_GRAPHICS_API_OPENGL_ES)
-target_include_directories(dddvr_openxr_native_smoke PRIVATE "${OPENXR_INCLUDE_DIR}")
+target_include_directories(
+    dddvr_openxr_native_smoke
+    PRIVATE
+        "${OPENXR_INCLUDE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third/imgui"
+)
 target_link_libraries(dddvr_openxr_native_smoke android log EGL GLESv3 native_app_glue openxr_loader)

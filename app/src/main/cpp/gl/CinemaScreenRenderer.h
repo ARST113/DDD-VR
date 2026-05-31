@@ -47,6 +47,14 @@ public:
         float g,
         float b
     );
+    void renderCursorDot(
+        const float* mvp,
+        const float center[3],
+        const float right[3],
+        const float up[3],
+        float radiusMeters,
+        bool active
+    );
 private:
     void rebuildVideoMesh();
     void appendVertex(
