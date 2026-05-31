@@ -2,6 +2,7 @@ package top.rootu.dddvr.core.playback
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Surface
 import top.rootu.dddvr.player.PlayerManager
 
@@ -14,7 +15,17 @@ class PlaybackSession(
     private var lastKnownIsPlaying: Boolean = false
 
     @Volatile
+    private var lastKnownWantsToPlay: Boolean = false
+
+    @Volatile
     private var lastKnownPositionMs: Long = 0L
+
+    @Volatile
+    private var currentVideoSurface: Surface? = null
+
+    @Volatile
+    var hasAttachedVideoSurface: Boolean = false
+        private set
 
     val isPlaying: Boolean
         get() {
@@ -51,20 +62,55 @@ class PlaybackSession(
             return playerManager.exoPlayer?.bufferedPosition ?: 0L
         }
 
-    fun attachSurface(surface: Surface) {
-        runOnPlayerThread {
-            playerManager.exoPlayer?.setVideoSurface(surface)
+    val wantsToPlay: Boolean
+        get() {
+            if (!isMainThread()) {
+                return lastKnownWantsToPlay
+            }
+
+            val value = playerManager.exoPlayer?.playWhenReady == true
+            lastKnownWantsToPlay = value
+            return value
         }
+
+    fun attachSurface(surface: Surface) {
+        currentVideoSurface = surface
+        runOnPlayerThread {
+            val player = playerManager.exoPlayer
+            if (player == null) {
+                hasAttachedVideoSurface = false
+                Log.i(TAG, "VR_SURFACE_ATTACH_DEFERRED surface=$surface")
+                return@runOnPlayerThread
+            }
+
+            player.setVideoSurface(surface)
+            hasAttachedVideoSurface = true
+            Log.i(TAG, "VR_SURFACE_ATTACHED surface=$surface")
+        }
+    }
+
+    fun attachCurrentSurface() {
+        val surface = currentVideoSurface
+        if (surface == null) {
+            Log.i(TAG, "VR_SURFACE_ATTACH_SKIPPED no current surface")
+            return
+        }
+        attachSurface(surface)
     }
 
     fun clearSurface(surface: Surface? = null) {
         runOnPlayerThread {
-            val player = playerManager.exoPlayer ?: return@runOnPlayerThread
+            val player = playerManager.exoPlayer
 
             if (surface != null) {
-                player.clearVideoSurface(surface)
+                player?.clearVideoSurface(surface)
             } else {
-                player.clearVideoSurface()
+                player?.clearVideoSurface()
+            }
+
+            if (surface == null || surface == currentVideoSurface) {
+                currentVideoSurface = null
+                hasAttachedVideoSurface = false
             }
         }
     }
@@ -78,6 +124,7 @@ class PlaybackSession(
     fun play() {
         runOnPlayerThread {
             playerManager.exoPlayer?.playWhenReady = true
+            lastKnownWantsToPlay = true
             lastKnownIsPlaying = true
         }
     }
@@ -85,6 +132,7 @@ class PlaybackSession(
     fun pause() {
         runOnPlayerThread {
             playerManager.exoPlayer?.playWhenReady = false
+            lastKnownWantsToPlay = false
             lastKnownIsPlaying = false
             lastKnownPositionMs = playerManager.exoPlayer?.currentPosition ?: lastKnownPositionMs
         }
@@ -107,7 +155,10 @@ class PlaybackSession(
     fun release() {
         runOnPlayerThread {
             lastKnownIsPlaying = false
+            lastKnownWantsToPlay = false
             lastKnownPositionMs = 0L
+            currentVideoSurface = null
+            hasAttachedVideoSurface = false
             playerManager.releasePlayer(isFinalRelease = true)
         }
     }
@@ -122,5 +173,9 @@ class PlaybackSession(
 
     private fun isMainThread(): Boolean {
         return Looper.myLooper() == Looper.getMainLooper()
+    }
+
+    private companion object {
+        const val TAG = "DDDVR/PlaybackSession"
     }
 }

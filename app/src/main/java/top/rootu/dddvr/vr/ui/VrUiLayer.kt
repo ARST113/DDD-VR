@@ -16,7 +16,11 @@ class VrUiLayer(
     fun isVisible(): Boolean = controlsOverlay.isVisible
     fun update(state: VrPlaybackState, curvedAvailable: Boolean) {
         controlsOverlay.updateState(state, curvedAvailable)
-        loading.isVisible = state.durationMs <= 0 && !state.hasError
+        loading.isVisible = state.durationMs <= 0 &&
+            state.positionMs <= 0 &&
+            state.bufferedPositionMs <= 0 &&
+            !state.isPlaying &&
+            !state.hasError
         errorText.isVisible = state.hasError
         errorText.text = state.errorMessage.orEmpty()
     }

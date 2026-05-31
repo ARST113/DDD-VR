@@ -1,12 +1,14 @@
 package top.rootu.dddvr.vr.activity
 
 import android.content.pm.ActivityInfo
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import android.view.ViewGroup
+import android.view.Surface
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ProgressBar
@@ -15,7 +17,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
@@ -42,8 +46,55 @@ class VrPlayerActivity : AppCompatActivity() {
     private lateinit var inputController: VrInputController
     private lateinit var poseProvider: AndroidRotationVectorPoseProvider
     private lateinit var surfaceView: VrGLSurfaceView
+    private var activeSurface: Surface? = null
+    private var lastPlayerError: String? = null
+    private var uiTick = 0
+    private var lastVideoWidth = 0
+    private var lastVideoHeight = 0
     private var initialized = false
     private val handler = Handler(Looper.getMainLooper())
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) lastPlayerError = null
+            val player = if (::playerManager.isInitialized) playerManager.exoPlayer else null
+            val frames = if (::renderer.isInitialized) "${renderer.framesRendered}/${renderer.framesAvailable}" else "n/a"
+            Log.i(
+                TAG,
+                "VR_PLAYER_STATE state=${playerStateName(playbackState)} " +
+                    "playWhenReady=${player?.playWhenReady} isPlaying=${player?.isPlaying} " +
+                    "position=${player?.currentPosition} buffered=${player?.bufferedPosition} duration=${player?.duration} " +
+                    "surfaceAttached=${if (::playbackSession.isInitialized) playbackSession.hasAttachedVideoSurface else false} " +
+                    "frames=$frames"
+            )
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            Log.i(TAG, "VR_PLAYER_IS_PLAYING isPlaying=$isPlaying")
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            lastPlayerError = "${error.errorCodeName}: ${error.message ?: "Playback failed"}"
+            Log.e(TAG, "VR_PLAYER_ERROR ${lastPlayerError}", error)
+        }
+
+        override fun onVideoSizeChanged(videoSize: VideoSize) {
+            val width = videoSize.width
+            val height = videoSize.height
+            if (width == lastVideoWidth && height == lastVideoHeight) return
+
+            lastVideoWidth = width
+            lastVideoHeight = height
+            Log.i(
+                TAG,
+                "VR_VIDEO_SIZE width=$width height=$height " +
+                    "rotation=${videoSize.unappliedRotationDegrees} ratio=${videoSize.pixelWidthHeightRatio}"
+            )
+            if (::renderer.isInitialized) {
+                renderer.setVideoSize(width, height)
+                attachActiveSurface("video_size")
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,11 +116,20 @@ class VrPlayerActivity : AppCompatActivity() {
             hasVrProjectionExtra = request.hasVrProjectionExtra
         )
 
-        playerManager = PlayerManager(this, object : Player.Listener {})
+        playerManager = PlayerManager(this, playerListener)
         playbackSession = PlaybackSession(playerManager)
+        playerManager.onPlayerCreated = {
+            attachActiveSurface("player_created")
+            scheduleSurfaceAttachRetry()
+        }
         poseProvider = AndroidRotationVectorPoseProvider(this)
         renderer = VrSceneRenderer(
-            onSurfaceReady = { surface -> playbackSession.attachSurface(surface) },
+            onSurfaceReady = { surface ->
+                activeSurface = surface
+                Log.i(TAG, "VR_SURFACE_READY surface=$surface playerCreated=${playerManager.exoPlayer != null}")
+                attachActiveSurface("surface_ready")
+                scheduleSurfaceAttachRetry()
+            },
             poseProvider = poseProvider,
             initialProjectionType = initialProjection
         )
@@ -88,7 +148,14 @@ class VrPlayerActivity : AppCompatActivity() {
 
         uiLayer = VrUiLayer(controls, loading, errorText)
         inputController = VrInputController(autoHideDelayMs = 8_000L, onShowControls = { uiLayer.show() }, onHideControls = { uiLayer.hide() }, isOverlayVisible = { uiLayer.isVisible() })
-        controller = VrPlayerController(this, playbackSession, { renderer.projectionManager }, renderer.stereoUvMapper, recenterHeadPose = { poseProvider.recenter() })
+        controller = VrPlayerController(
+            this,
+            playbackSession,
+            { renderer.projectionManager },
+            renderer.stereoUvMapper,
+            recenterHeadPose = { poseProvider.recenter() },
+            playbackErrorProvider = { lastPlayerError }
+        )
 
         controls.callbacks = object : VrControlsOverlay.Callbacks {
             override fun onPlayPause() = controller.togglePlay()
@@ -115,17 +182,35 @@ class VrPlayerActivity : AppCompatActivity() {
         controller.setStereoMode(stereoMode)
         controller.swapEyes(config.swapEyes)
         playerManager.loadPlaylist(listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)), 0, request.startPositionMs)
+        attachActiveSurface("after_load")
+        scheduleSurfaceAttachRetry()
         inputController.enable()
         uiLayer.show()
         startUiLoop()
         initialized = true
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
+    }
+
     private fun startUiLoop() {
         handler.post(object : Runnable {
             override fun run() {
                 val curvedAvailable = runCatching { renderer.projectionManager.hasProjection(ProjectionType.CURVED) }.getOrDefault(false)
-                uiLayer.update(controller.getState(), curvedAvailable)
+                val state = controller.getState()
+                uiLayer.update(state, curvedAvailable)
+                if (uiTick++ % UI_STATE_LOG_INTERVAL_TICKS == 0) {
+                    Log.i(
+                        TAG,
+                        "VR_UI_STATE playing=${state.isPlaying} pos=${state.positionMs} " +
+                            "buffered=${state.bufferedPositionMs} duration=${state.durationMs} " +
+                            "surfaceAttached=${playbackSession.hasAttachedVideoSurface} " +
+                            "frames=${renderer.framesRendered}/${renderer.framesAvailable}"
+                    )
+                }
                 if (inputController.shouldAutoHide(android.os.SystemClock.uptimeMillis())) inputController.hideControls()
                 handler.postDelayed(this, 500)
             }
@@ -139,6 +224,7 @@ class VrPlayerActivity : AppCompatActivity() {
         poseProvider.start()
         surfaceView.onResume()
         applyImmersiveMode()
+        scheduleSurfaceAttachRetry()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -187,10 +273,50 @@ class VrPlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         if (initialized) {
+            activeSurface?.let { playbackSession.clearSurface(it) }
+            activeSurface = null
             inputController.disable()
             controller.release()
         }
         super.onDestroy()
+    }
+
+    private fun attachActiveSurface(reason: String) {
+        val surface = activeSurface
+        if (surface == null) {
+            Log.i(TAG, "VR_SURFACE_ATTACH_SKIPPED reason=$reason no surface")
+            return
+        }
+
+        playbackSession.attachSurface(surface)
+        Log.i(
+            TAG,
+            "VR_SURFACE_ATTACH_REQUEST reason=$reason surface=$surface " +
+                "playerCreated=${playerManager.exoPlayer != null}"
+        )
+    }
+
+    private fun scheduleSurfaceAttachRetry(attempt: Int = 0) {
+        if (!::playbackSession.isInitialized || !::playerManager.isInitialized || activeSurface == null) return
+        attachActiveSurface("retry_$attempt")
+        if (!playbackSession.hasAttachedVideoSurface && attempt < MAX_SURFACE_ATTACH_RETRIES) {
+            handler.postDelayed({ scheduleSurfaceAttachRetry(attempt + 1) }, SURFACE_ATTACH_RETRY_MS)
+        }
+    }
+
+    companion object {
+        private const val TAG = "DDDVR/VrPlayer"
+        private const val MAX_SURFACE_ATTACH_RETRIES = 20
+        private const val SURFACE_ATTACH_RETRY_MS = 250L
+        private const val UI_STATE_LOG_INTERVAL_TICKS = 10
+
+        private fun playerStateName(state: Int): String = when (state) {
+            Player.STATE_IDLE -> "IDLE"
+            Player.STATE_BUFFERING -> "BUFFERING"
+            Player.STATE_READY -> "READY"
+            Player.STATE_ENDED -> "ENDED"
+            else -> "UNKNOWN($state)"
+        }
     }
 
     internal fun mapProjectionMode(

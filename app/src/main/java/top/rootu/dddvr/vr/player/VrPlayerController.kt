@@ -13,7 +13,8 @@ class VrPlayerController(
     private val playbackSession: PlaybackSession,
     private val projectionManagerProvider: () -> ProjectionManager,
     private val stereoUvMapper: StereoUvMapper,
-    private val recenterHeadPose: () -> Unit = {}
+    private val recenterHeadPose: () -> Unit = {},
+    private val playbackErrorProvider: () -> String? = { null }
 ) {
     fun play() = playbackSession.play()
     fun pause() = playbackSession.pause()
@@ -51,20 +52,23 @@ class VrPlayerController(
     fun getDurationMs(): Long = playbackSession.durationMs
     fun isPlaying(): Boolean = playbackSession.isPlaying
     fun getCurrentTitle(): String? = null
-    fun getState(): VrPlaybackState = VrPlaybackState(
-        isPlaying = isPlaying(),
-        positionMs = getCurrentPositionMs(),
-        durationMs = getDurationMs().takeIf { it != C.TIME_UNSET } ?: 0L,
-        bufferedPositionMs = playbackSession.bufferedPositionMs,
-        title = getCurrentTitle(),
-        currentIndex = 0,
-        itemCount = 1,
-        stereoMode = getStereoMode(),
-        projectionType = getProjection(),
-        swapEyes = stereoUvMapper.swapEyes,
-        hasError = false,
-        errorMessage = null
-    )
+    fun getState(): VrPlaybackState {
+        val errorMessage = playbackErrorProvider()
+        return VrPlaybackState(
+            isPlaying = isPlaying(),
+            positionMs = getCurrentPositionMs(),
+            durationMs = getDurationMs().takeIf { it != C.TIME_UNSET } ?: 0L,
+            bufferedPositionMs = playbackSession.bufferedPositionMs,
+            title = getCurrentTitle(),
+            currentIndex = 0,
+            itemCount = 1,
+            stereoMode = getStereoMode(),
+            projectionType = getProjection(),
+            swapEyes = stereoUvMapper.swapEyes,
+            hasError = errorMessage != null,
+            errorMessage = errorMessage
+        )
+    }
 
     fun release() = playbackSession.release()
 }

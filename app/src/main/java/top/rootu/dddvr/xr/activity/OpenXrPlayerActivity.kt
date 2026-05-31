@@ -1,21 +1,28 @@
 package top.rootu.dddvr.xr.activity
 
 import android.app.Activity
-import android.content.pm.ActivityInfo
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.KeyEvent
 import android.view.Surface
 import android.view.WindowManager
+import androidx.media3.common.Format
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
 import top.rootu.dddvr.vr.activity.VrIntentParser
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
+import top.rootu.dddvr.vr.input.VrControllerInputMapper
+import top.rootu.dddvr.vr.input.VrKeyAction
+import top.rootu.dddvr.vr.stereo.StereoInputMode
 import top.rootu.dddvr.xr.bridge.OpenXrBridge
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
+import top.rootu.dddvr.xr.model.OpenXrScreenMode
 import top.rootu.dddvr.xr.ui.OpenXrDebugOverlay
 
 class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
@@ -25,6 +32,12 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val startOpenXrRunnable = Runnable { startOpenXrFromScheduledState() }
     private val playerStartRunnable = Runnable { initializePlayerIfNeeded("post_xr_start") }
+    private val uiStateRunnable = object : Runnable {
+        override fun run() {
+            updateOpenXrUiState("tick")
+            if (!destroyed) mainHandler.postDelayed(this, UI_STATE_UPDATE_MS)
+        }
+    }
     private var activeSurface: Surface? = null
     private var playbackRequest: VrPlaybackRequest? = null
     private var initialized = false
@@ -39,27 +52,56 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var stopped = false
     private var topResumed = false
     private var pausedBeforeXrStart = false
+    private var resumePlaybackAfterFocusLoss = false
+    private var openXrUiVisible = true
     private var xrStartAttempt = 0
     private var notResumedRetryCount = 0
+    private var sourceErrorRetryCount = 0
     private var xrStartState = XrStartState.NOT_REQUESTED
+
+    private val openXrPlayerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) {
+                sourceErrorRetryCount = 0
+            }
+            updateOpenXrUiState("player_state_$playbackState")
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updateOpenXrUiState("is_playing_$isPlaying")
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            if (recoverFromSourceError(error)) return
+            Log.e(TAG, "XR_PLAYER_FATAL code=${error.errorCodeName} message=${error.message}", error)
+            openXrUiVisible = true
+            updateOpenXrUiState("player_fatal_error")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "ACTIVITY_ON_CREATE_BEGIN")
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val request = VrIntentParser.parse(intent) ?: run {
-            Log.e(TAG, "Invalid intent for OpenXrPlayerActivity")
-            finish()
-            return
-        }
+        val parsedRequest = VrIntentParser.parse(intent)
+        val request = parsedRequest ?: restoreLastPlaybackRequest()
         playbackRequest = request
 
-        smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true
+        smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true || request == null
         Log.i(TAG, "OpenXrPlayerActivity smokeOnly=$smokeOnly")
 
-        val config = OpenXrPlaybackConfig.from(request)
+        if (parsedRequest != null) {
+            saveLastPlaybackRequest(parsedRequest)
+        }
+
+        val config = request?.let { OpenXrPlaybackConfig.from(it) }
+            ?: OpenXrPlaybackConfig(
+                stereoMode = StereoInputMode.MONO,
+                swapEyes = false,
+                screenMode = OpenXrScreenMode.FLAT,
+                startPositionMs = 0L
+            )
         OpenXrDebugOverlay.logStartup(config)
 
         bridge = OpenXrBridge(this, this, config)
@@ -91,6 +133,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         super.onNewIntent(intent)
         setIntent(intent)
         logLifecycle("ACTIVITY_ON_NEW_INTENT")
+        if (initialized || playerInitialized) {
+            mainHandler.post { recreate() }
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -102,13 +147,19 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         super.onTopResumedActivityChanged(isTopResumedActivity)
         topResumed = isTopResumedActivity
         if (initialized && xrStartState == XrStartState.STARTED && !isTopResumedActivity) {
-            Log.e(TAG, "CURRENT_BLOCKER ACTIVITY_LOST_TOP_RESUMED_AFTER_SWAPCHAIN")
+            Log.w(TAG, "XR_FOCUS_TRANSIENT ACTIVITY_LOST_TOP_RESUMED_AFTER_SWAPCHAIN")
+        }
+        if (isTopResumedActivity) {
+            if (initialized && !playerInitialized) {
+                schedulePlayerStart("top_resumed")
+            }
+            resumePlaybackIfForeground("top_resumed")
         }
         logLifecycle("TOP_RESUMED_CHANGED isTopResumed=$isTopResumedActivity")
     }
 
     private fun logLifecycle(event: String) {
-        Log.i(TAG, "$event initialized=$initialized playerInitialized=$playerInitialized smokeOnly=$smokeOnly xrStartState=$xrStartState xrStartScheduled=$xrStartScheduled resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus started=$started destroyed=$destroyed stopped=$stopped pausedBeforeXrStart=$pausedBeforeXrStart isFinishing=$isFinishing isDestroyed=$isDestroyed attempt=$xrStartAttempt notResumedRetryCount=$notResumedRetryCount")
+        Log.i(TAG, "$event initialized=$initialized playerInitialized=$playerInitialized smokeOnly=$smokeOnly xrStartState=$xrStartState xrStartScheduled=$xrStartScheduled resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus started=$started destroyed=$destroyed stopped=$stopped pausedBeforeXrStart=$pausedBeforeXrStart resumePlaybackAfterFocusLoss=$resumePlaybackAfterFocusLoss isFinishing=$isFinishing isDestroyed=$isDestroyed attempt=$xrStartAttempt notResumedRetryCount=$notResumedRetryCount")
         Log.i(TAG, "XR_START_STATE event=$event xrStartState=$xrStartState")
     }
 
@@ -128,6 +179,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         } else {
             scheduleOpenXrStart("onResume_first", FIRST_XR_START_DELAY_MS)
         }
+        resumePlaybackIfForeground("activity_resume")
     }
 
     override fun onPostResume() {
@@ -145,15 +197,84 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         if (hasFocus && resumed && !initialized) {
             scheduleOpenXrStart("windowFocus", XR_RETRY_DELAY_MS)
         }
+        if (hasFocus) {
+            if (initialized && !playerInitialized) {
+                schedulePlayerStart("window_focus")
+            }
+            resumePlaybackIfForeground("window_focus")
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        val action = VrControllerInputMapper.map(event.keyCode)
+        if (action == VrKeyAction.NONE) return super.dispatchKeyEvent(event)
+
+        Log.i(TAG, "XR_KEY_ACTION key=${event.keyCode} action=$action")
+        return when (action) {
+            VrKeyAction.PLAY_PAUSE -> {
+                onPlayPause()
+                true
+            }
+            VrKeyAction.PLAY -> {
+                if (!smokeOnly && playerInitialized) {
+                    playbackSession.play()
+                    openXrUiVisible = true
+                    updateOpenXrUiState("key_play")
+                }
+                true
+            }
+            VrKeyAction.PAUSE -> {
+                if (!smokeOnly && playerInitialized) {
+                    playbackSession.pause()
+                    openXrUiVisible = true
+                    updateOpenXrUiState("key_pause")
+                }
+                true
+            }
+            VrKeyAction.SEEK_BACK -> {
+                onSeekBy(-15_000)
+                true
+            }
+            VrKeyAction.SEEK_FORWARD -> {
+                onSeekBy(15_000)
+                true
+            }
+            VrKeyAction.TOGGLE_OVERLAY -> {
+                onShowMenu()
+                true
+            }
+            VrKeyAction.HIDE_OR_EXIT -> {
+                if (openXrUiVisible) {
+                    openXrUiVisible = false
+                    updateOpenXrUiState("key_hide_ui")
+                } else {
+                    finish()
+                }
+                true
+            }
+            VrKeyAction.RECENTER -> {
+                onRecenter()
+                true
+            }
+            VrKeyAction.TOGGLE_STEREO -> {
+                openXrUiVisible = true
+                updateOpenXrUiState("key_stereo_request")
+                OpenXrDebugOverlay.logSessionState("stereo_toggle_request")
+                true
+            }
+            VrKeyAction.NONE -> false
+        }
     }
 
     override fun onPause() {
         super.onPause()
         logLifecycle("ACTIVITY_ON_PAUSE")
         if (initialized && xrStartState == XrStartState.STARTED) {
-            Log.e(TAG, "CURRENT_STATE SEETHROUGH_OR_GUARDIAN_STOLE_FOCUS")
-            Log.e(TAG, "CURRENT_BLOCKER SEETHROUGH_SETTINGS_STOLE_FOCUS")
+            Log.w(TAG, "CURRENT_STATE XR_FOCUS_OR_GUARDIAN_PAUSE")
+            Log.w(TAG, "XR_FOCUS_TRANSIENT SEETHROUGH_OR_GUARDIAN_STOLE_FOCUS")
         }
+        pausePlaybackForFocusLoss("activity_pause")
         resumed = false
         hasWindowFocus = false
 
@@ -191,6 +312,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         resumed = false
         mainHandler.removeCallbacks(startOpenXrRunnable)
         mainHandler.removeCallbacks(playerStartRunnable)
+        mainHandler.removeCallbacks(uiStateRunnable)
         xrStartScheduled = false
         playerStartScheduled = false
         activeSurface?.let { surface ->
@@ -198,7 +320,6 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 runCatching { playbackSession.clearSurface(surface) }
                     .onFailure { Log.e(TAG, "Unable to clear playback surface", it) }
             }
-            surface.release()
             activeSurface = null
         }
         if (::bridge.isInitialized) {
@@ -216,6 +337,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         if (!smokeOnly && playerInitialized) activeSurface?.let { playbackSession.clearSurface(it) }
         activeSurface = surface
         if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
+        Log.i(TAG, "XR_VIDEO_SURFACE_READY surface=$surface playerInitialized=$playerInitialized")
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
@@ -232,7 +354,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         xrStartScheduled = true
         xrStartState = XrStartState.SCHEDULED
         Log.i(TAG, "XR_START_SCHEDULED reason=$reason delayMs=$delayMs attempt=${xrStartAttempt + 1}")
-        if (delayMs == 0L) mainHandler.post(startOpenXrRunnable) else mainHandler.postDelayed(startOpenXrRunnable, delayMs)
+        if (delayMs == 0L) startOpenXrFromScheduledState() else mainHandler.postDelayed(startOpenXrRunnable, delayMs)
     }
 
     private fun startOpenXrFromScheduledState() {
@@ -285,6 +407,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         pausedBeforeXrStart = false
         runCatching { bridge.onResume() }
             .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge after start", it) }
+        bridge.setUiState(openXrUiVisible, 0, false)
+        mainHandler.removeCallbacks(uiStateRunnable)
+        mainHandler.post(uiStateRunnable)
         schedulePlayerStart("xr_started")
     }
 
@@ -306,12 +431,24 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private fun initializePlayerIfNeeded(reason: String) {
         playerStartScheduled = false
         if (destroyed || smokeOnly || playerInitialized) return
+        if (!isForegroundForPlayback()) {
+            Log.i(TAG, "PLAYER_START_DEFERRED_NOT_FOREGROUND reason=$reason resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus")
+            return
+        }
         val request = playbackRequest ?: run {
             Log.e(TAG, "PLAYER_START_SKIPPED missing playback request")
             return
         }
         Log.i(TAG, "PLAYER_START_BEGIN reason=$reason")
-        playerManager = PlayerManager(this, object : Player.Listener {})
+        playerManager = PlayerManager(this, openXrPlayerListener)
+        playerManager.onPlayerCreated = {
+            Log.i(TAG, "XR_PLAYER_CREATED hasSurface=${activeSurface != null}")
+            it.volume = 1f
+            activeSurface?.let { surface -> playbackSession.attachSurface(surface) }
+            updateOpenXrUiState("player_created")
+        }
+        playerManager.onVideoFormatChanged = { format -> onVideoFormatChanged(format) }
+        playerManager.onAudioOutputFormatChanged = { info -> Log.i(TAG, "XR_AUDIO_FORMAT $info") }
         playbackSession = PlaybackSession(playerManager)
         playerInitialized = true
         playerManager.loadPlaylist(
@@ -320,7 +457,130 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             request.startPositionMs
         )
         activeSurface?.let { playbackSession.attachSurface(it) }
+        updateOpenXrUiState("player_start_end")
         Log.i(TAG, "PLAYER_START_END")
+    }
+
+    private fun recoverFromSourceError(error: PlaybackException): Boolean {
+        if (!::playerManager.isInitialized || !playerInitialized) return false
+        val player = playerManager.exoPlayer ?: return false
+        if (player.mediaItemCount <= 0) return false
+        if (sourceErrorRetryCount >= MAX_SOURCE_ERROR_RETRIES) return false
+
+        sourceErrorRetryCount += 1
+        val retryIndex = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
+        val retryPosition = player.currentPosition.coerceAtLeast(0L)
+        val items = (0 until player.mediaItemCount).map { index -> player.getMediaItemAt(index) }
+        val delayMs = SOURCE_ERROR_RETRY_DELAY_MS * sourceErrorRetryCount
+
+        Log.w(
+            TAG,
+            "XR_SOURCE_ERROR_RECOVER attempt=$sourceErrorRetryCount/$MAX_SOURCE_ERROR_RETRIES " +
+                "delayMs=$delayMs pos=$retryPosition code=${error.errorCodeName} cause=${rootCauseMessage(error)}"
+        )
+        openXrUiVisible = true
+        updateOpenXrUiState("source_error_recover")
+
+        mainHandler.postDelayed({
+            if (destroyed || !playerInitialized || smokeOnly) return@postDelayed
+            val retryPlayer = playerManager.exoPlayer ?: return@postDelayed
+            runCatching {
+                retryPlayer.setMediaItems(items, retryIndex, retryPosition)
+                retryPlayer.prepare()
+                retryPlayer.playWhenReady = true
+                retryPlayer.play()
+                activeSurface?.let { playbackSession.attachSurface(it) }
+                updateOpenXrUiState("source_error_retry")
+                Log.i(TAG, "XR_SOURCE_ERROR_RETRY_START attempt=$sourceErrorRetryCount pos=$retryPosition")
+            }.onFailure {
+                Log.e(TAG, "XR_SOURCE_ERROR_RETRY_FAILED attempt=$sourceErrorRetryCount", it)
+            }
+        }, delayMs)
+        return true
+    }
+
+    private fun rootCauseMessage(error: Throwable): String {
+        var cause: Throwable = error
+        while (cause.cause != null && cause.cause !== cause) {
+            cause = cause.cause!!
+        }
+        return "${cause.javaClass.simpleName}:${cause.message}"
+    }
+
+    private fun pausePlaybackForFocusLoss(reason: String) {
+        if (smokeOnly || !playerInitialized) return
+        if (playbackSession.isPlaying || playbackSession.wantsToPlay) {
+            resumePlaybackAfterFocusLoss = true
+            playbackSession.pause()
+            updateOpenXrUiState("focus_loss_pause")
+            Log.i(TAG, "PLAYER_PAUSED_FOR_XR_FOCUS_LOSS reason=$reason position=${playbackSession.currentPositionMs}")
+        } else {
+            resumePlaybackAfterFocusLoss = false
+            Log.i(TAG, "PLAYER_PAUSE_FOR_XR_FOCUS_LOSS_SKIPPED notPlaying reason=$reason")
+        }
+    }
+
+    private fun isForegroundForPlayback(): Boolean {
+        return resumed && (topResumed || hasWindowFocus)
+    }
+
+    private fun resumePlaybackIfForeground(reason: String) {
+        if (smokeOnly || !playerInitialized || !resumePlaybackAfterFocusLoss) return
+        if (!isForegroundForPlayback()) {
+            Log.i(TAG, "PLAYER_RESUME_AFTER_XR_FOCUS_LOSS_DEFERRED reason=$reason resumed=$resumed topResumed=$topResumed hasWindowFocus=$hasWindowFocus")
+            return
+        }
+        resumePlaybackAfterFocusLoss = false
+        playbackSession.play()
+        updateOpenXrUiState("focus_return_play")
+        Log.i(TAG, "PLAYER_RESUMED_AFTER_XR_FOCUS_LOSS reason=$reason position=${playbackSession.currentPositionMs}")
+    }
+
+    private fun onVideoFormatChanged(format: Format) {
+        val width = format.width
+        val height = format.height
+        if (width <= 0 || height <= 0) return
+        Log.i(TAG, "XR_VIDEO_FORMAT width=$width height=$height sampleMime=${format.sampleMimeType}")
+        bridge.setVideoSize(width, height)
+    }
+
+    private fun updateOpenXrUiState(reason: String) {
+        if (!::bridge.isInitialized) return
+        val playing = !smokeOnly && playerInitialized && playbackSession.isPlaying
+        val progress = if (!smokeOnly && playerInitialized) {
+            val duration = playbackSession.durationMs
+            val position = playbackSession.currentPositionMs
+            if (duration > 0L) ((position * 1000L) / duration).toInt() else 0
+        } else {
+            0
+        }
+        bridge.setUiState(openXrUiVisible, progress, playing)
+        if (reason != "tick") {
+            Log.i(TAG, "XR_UI_STATE reason=$reason visible=$openXrUiVisible progress=$progress playing=$playing")
+        }
+    }
+
+    private fun saveLastPlaybackRequest(request: VrPlaybackRequest) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(PREF_LAST_URI, request.uri.toString())
+            .putString(PREF_LAST_TITLE, request.title)
+            .apply()
+    }
+
+    private fun restoreLastPlaybackRequest(): VrPlaybackRequest? {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val uri = prefs.getString(PREF_LAST_URI, null) ?: run {
+            Log.w(TAG, "OPENXR_LAUNCH_NO_URI no last playback request")
+            return null
+        }
+        val title = prefs.getString(PREF_LAST_TITLE, null)
+        val restoredIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).apply {
+            putExtra(Intent.EXTRA_TITLE, title)
+        }
+        val restored = VrIntentParser.parse(restoredIntent)
+        Log.i(TAG, "OPENXR_LAUNCH_RESTORED_LAST_URI restored=${restored != null} uri=$uri")
+        return restored
     }
 
     enum class XrStartState {
@@ -332,9 +592,37 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         FAILED
     }
 
-    override fun onPlayPause() { if (!smokeOnly && playerInitialized) { if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play() } }
-    override fun onSeekBy(deltaMs: Long) { if (!smokeOnly && playerInitialized) playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs) }
+    override fun onPlayPause() {
+        if (!smokeOnly && playerInitialized) {
+            if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play()
+            openXrUiVisible = true
+            updateOpenXrUiState("input_play_pause")
+        }
+    }
+    override fun onSeekBy(deltaMs: Long) {
+        if (!smokeOnly && playerInitialized) {
+            playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs)
+            openXrUiVisible = true
+            updateOpenXrUiState("input_seek")
+        }
+    }
+    override fun onSeekToProgress(progressPermille: Int) {
+        if (!smokeOnly && playerInitialized) {
+            val duration = playbackSession.durationMs
+            if (duration <= 0L) return
+            val positionMs = (duration * progressPermille.coerceIn(0, 1000)) / 1000L
+            playbackSession.seekTo(positionMs)
+            openXrUiVisible = true
+            updateOpenXrUiState("input_timeline_seek")
+            Log.i(TAG, "XR_TIMELINE_SEEK_APPLIED progress=$progressPermille positionMs=$positionMs durationMs=$duration")
+        }
+    }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
+    override fun onShowMenu() {
+        openXrUiVisible = !openXrUiVisible
+        updateOpenXrUiState("show_menu_request")
+        OpenXrDebugOverlay.logSessionState("show_menu_request visible=$openXrUiVisible")
+    }
     override fun onExit() { finish() }
 
     companion object {
@@ -342,6 +630,12 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         private const val FIRST_XR_START_DELAY_MS = 0L
         private const val XR_RETRY_DELAY_MS = 500L
         private const val PLAYER_START_DELAY_MS = 200L
+        private const val UI_STATE_UPDATE_MS = 1_000L
         private const val MAX_NOT_RESUMED_RETRIES = 5
+        private const val MAX_SOURCE_ERROR_RETRIES = 20
+        private const val SOURCE_ERROR_RETRY_DELAY_MS = 500L
+        private const val PREFS_NAME = "openxr_player"
+        private const val PREF_LAST_URI = "last_uri"
+        private const val PREF_LAST_TITLE = "last_title"
     }
 }

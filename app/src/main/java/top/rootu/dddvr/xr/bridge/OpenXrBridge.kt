@@ -2,6 +2,8 @@ package top.rootu.dddvr.xr.bridge
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import top.rootu.dddvr.xr.input.OpenXrInputMapper
@@ -13,6 +15,7 @@ class OpenXrBridge(
     private val config: OpenXrPlaybackConfig
 ) {
     private var nativeHandle: Long = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun start(): Boolean {
         nativeHandle = nativeCreate(activity, activity.applicationContext, config)
@@ -39,6 +42,16 @@ class OpenXrBridge(
         nativePause(nativeHandle)
     }
 
+    fun setVideoSize(width: Int, height: Int) {
+        if (nativeHandle == 0L || width <= 0 || height <= 0) return
+        nativeSetVideoSize(nativeHandle, width, height)
+    }
+
+    fun setUiState(visible: Boolean, progressPermille: Int, playing: Boolean) {
+        if (nativeHandle == 0L) return
+        nativeSetUiState(nativeHandle, visible, progressPermille.coerceIn(0, 1000), playing)
+    }
+
     fun destroy() {
         if (nativeHandle == 0L) return
         nativeDestroy(nativeHandle)
@@ -46,18 +59,29 @@ class OpenXrBridge(
     }
 
     @Suppress("unused")
-    private fun onVideoSurfaceReadyFromNative(surface: Surface) = callbacks.onVideoSurfaceReady(surface)
+    private fun onVideoSurfaceReadyFromNative(surface: Surface) {
+        mainHandler.post { callbacks.onVideoSurfaceReady(surface) }
+    }
 
     @Suppress("unused")
     private fun onInputActionFromNative(actionCode: Int) {
-        when (OpenXrInputMapper.fromNativeCode(actionCode)) {
-            top.rootu.dddvr.xr.input.OpenXrInputAction.PLAY_PAUSE -> callbacks.onPlayPause()
-            top.rootu.dddvr.xr.input.OpenXrInputAction.SEEK_BACK -> callbacks.onSeekBy(-15_000)
-            top.rootu.dddvr.xr.input.OpenXrInputAction.SEEK_FORWARD -> callbacks.onSeekBy(15_000)
-            top.rootu.dddvr.xr.input.OpenXrInputAction.RECENTER -> callbacks.onRecenter()
-            top.rootu.dddvr.xr.input.OpenXrInputAction.EXIT -> callbacks.onExit()
-            else -> Unit
+        val action = OpenXrInputMapper.fromNativeCode(actionCode)
+        mainHandler.post {
+            when (action) {
+                top.rootu.dddvr.xr.input.OpenXrInputAction.PLAY_PAUSE -> callbacks.onPlayPause()
+                top.rootu.dddvr.xr.input.OpenXrInputAction.SEEK_BACK -> callbacks.onSeekBy(-15_000)
+                top.rootu.dddvr.xr.input.OpenXrInputAction.SEEK_FORWARD -> callbacks.onSeekBy(15_000)
+                top.rootu.dddvr.xr.input.OpenXrInputAction.RECENTER -> callbacks.onRecenter()
+                top.rootu.dddvr.xr.input.OpenXrInputAction.SHOW_MENU -> callbacks.onShowMenu()
+                top.rootu.dddvr.xr.input.OpenXrInputAction.EXIT -> callbacks.onExit()
+                else -> Unit
+            }
         }
+    }
+
+    @Suppress("unused")
+    private fun onTimelineSeekFromNative(progressPermille: Int) {
+        mainHandler.post { callbacks.onSeekToProgress(progressPermille.coerceIn(0, 1000)) }
     }
 
     @Suppress("unused")
@@ -69,7 +93,9 @@ class OpenXrBridge(
         fun onVideoSurfaceReady(surface: Surface)
         fun onPlayPause()
         fun onSeekBy(deltaMs: Long)
+        fun onSeekToProgress(progressPermille: Int)
         fun onRecenter()
+        fun onShowMenu()
         fun onExit()
     }
 
@@ -77,6 +103,8 @@ class OpenXrBridge(
     private external fun nativeStart(handle: Long): Boolean
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
+    private external fun nativeSetVideoSize(handle: Long, width: Int, height: Int)
+    private external fun nativeSetUiState(handle: Long, visible: Boolean, progressPermille: Int, playing: Boolean)
     private external fun nativeDestroy(handle: Long)
 
     companion object {
