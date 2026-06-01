@@ -45,16 +45,17 @@ void VrPlayerPanel::draw() {
     const float buffered = std::clamp(static_cast<float>(state_.bufferedPositionMs) / duration, 0.f, 1.f);
     const ImVec2 mouse = io.MousePos;
 
-    const ImVec2 panelMin(270.f, 82.f);
-    const ImVec2 panelMax(1330.f, 412.f);
+    const ImVec2 panelMin(100.f, 132.f);
+    const ImVec2 panelMax(1500.f, 470.f);
     const float panelWidth = panelMax.x - panelMin.x;
+    const float centerX = (panelMin.x + panelMax.x) * 0.5f;
     const float panelRounding = 28.f;
-    const ImVec2 timelineRowMin(panelMin.x + 28.f, panelMin.y + 18.f);
-    const ImVec2 timelineRowMax(panelMax.x - 28.f, panelMin.y + 142.f);
-    const ImVec2 controlsRowMin(panelMin.x + 28.f, panelMin.y + 162.f);
-    const ImVec2 controlsRowMax(panelMax.x - 28.f, panelMax.y - 24.f);
-    const float timelineTrackLeft = timelineRowMin.x + 184.f;
-    const float timelineTrackRight = timelineRowMax.x - 184.f;
+    const ImVec2 timelineRowMin(panelMin.x + 34.f, panelMin.y + 18.f);
+    const ImVec2 timelineRowMax(panelMax.x - 34.f, panelMin.y + 140.f);
+    const ImVec2 controlsRowMin(panelMin.x + 34.f, panelMin.y + 158.f);
+    const ImVec2 controlsRowMax(panelMax.x - 34.f, panelMax.y - 28.f);
+    const float timelineTrackLeft = timelineRowMin.x + 190.f;
+    const float timelineTrackRight = timelineRowMax.x - 190.f;
     const float timelineTrackWidth = timelineTrackRight - timelineTrackLeft;
     const float timelineY = timelineRowMin.y + 62.f;
     const bool pointerInsidePanel = pointInRect(mouse, panelMin, panelMax);
@@ -146,8 +147,8 @@ void VrPlayerPanel::draw() {
         }
     }
 
-    draw->AddRectFilled(panelMin, panelMax, IM_COL32(10, 12, 18, 232), panelRounding);
-    draw->AddRectFilled(panelMin, ImVec2(panelMax.x, panelMin.y + 88.f), IM_COL32(255, 255, 255, 13), panelRounding, ImDrawFlags_RoundCornersTopLeft | ImDrawFlags_RoundCornersTopRight);
+    draw->AddRectFilled(panelMin, panelMax, IM_COL32(10, 12, 18, 236), panelRounding);
+    draw->AddRectFilled(panelMin, ImVec2(panelMax.x, panelMin.y + 96.f), IM_COL32(255, 255, 255, 16), panelRounding, ImDrawFlags_RoundCornersTopLeft | ImDrawFlags_RoundCornersTopRight);
     if (panelMode_ != VrPlayerPanelMode::Normal) {
         const float fillRight = panelMin.x + panelWidth * scrubPreviewProgress_;
         draw->AddRectFilled(panelMin, ImVec2(fillRight, panelMax.y), IM_COL32(45, 110, 220, 158), panelRounding);
@@ -163,7 +164,8 @@ void VrPlayerPanel::draw() {
     if (timeHovered) draw->AddRectFilled(currentTimeHitMin, currentTimeHitMax, IM_COL32(70, 110, 185, 92), 15.f);
     if (durationHovered) draw->AddRectFilled(durationHitMin, durationHitMax, IM_COL32(70, 110, 185, 92), 15.f);
     draw->AddText(ImVec2(timelineRowMin.x + 18.f, timelineY - 15.f), IM_COL32(245, 247, 255, 255), position);
-    draw->AddText(ImVec2(timelineRowMax.x - 136.f, timelineY - 15.f), IM_COL32(245, 247, 255, 255), durationText);
+    const ImVec2 durationSize = ImGui::CalcTextSize(durationText);
+    draw->AddText(ImVec2(timelineRowMax.x - durationSize.x - 18.f, timelineY - 15.f), IM_COL32(245, 247, 255, 255), durationText);
 
     draw->AddRectFilled(ImVec2(timelineTrackLeft, timelineY - 5.f), ImVec2(timelineTrackRight, timelineY + 5.f), IM_COL32(76, 82, 96, 226), 5.f);
     draw->AddRectFilled(ImVec2(timelineTrackLeft, timelineY - 5.f), ImVec2(timelineTrackLeft + timelineTrackWidth * buffered, timelineY + 5.f), IM_COL32(100, 116, 146, 220), 5.f);
@@ -173,8 +175,8 @@ void VrPlayerPanel::draw() {
     draw->AddCircleFilled(ImVec2(knobX, timelineY), timelineHovered || timelineActive ? 13.f : 9.f, IM_COL32(246, 248, 255, 255));
 
     const std::string title = state_.title.empty() ? "DDD-VR OpenXR Player" : state_.title;
-    const ImVec2 titleMin(controlsRowMin.x + 88.f, controlsRowMin.y + 58.f);
-    const ImVec2 titleMax(panelMin.x + 440.f, controlsRowMin.y + 112.f);
+    const ImVec2 titleMin(controlsRowMin.x + 104.f, controlsRowMin.y + 60.f);
+    const ImVec2 titleMax(centerX - 250.f, controlsRowMin.y + 116.f);
     draw->PushClipRect(titleMin, titleMax, true);
     draw->AddText(titleMin, IM_COL32(218, 226, 238, 240), title.c_str());
     draw->PopClipRect();
@@ -211,21 +213,20 @@ void VrPlayerPanel::draw() {
         return clicked;
     };
 
-    const float centerX = (panelMin.x + panelMax.x) * 0.5f;
-    const float buttonY = controlsRowMin.y + 36.f;
-    const ImVec2 menuMin(controlsRowMin.x + 18.f, buttonY + 6.f);
-    const ImVec2 menuMax(menuMin.x + 64.f, buttonY + 64.f);
+    const float buttonY = controlsRowMin.y + 42.f;
+    const ImVec2 menuMin(controlsRowMin.x + 22.f, buttonY + 4.f);
+    const ImVec2 menuMax(menuMin.x + 74.f, buttonY + 74.f);
     draw->AddRectFilled(menuMin, menuMax, IM_COL32(24, 27, 35, 158), 14.f);
-    draw->AddLine(ImVec2(menuMin.x + 18.f, menuMin.y + 20.f), ImVec2(menuMin.x + 46.f, menuMin.y + 20.f), IM_COL32(235, 242, 255, 220), 3.f);
-    draw->AddLine(ImVec2(menuMin.x + 18.f, menuMin.y + 32.f), ImVec2(menuMin.x + 40.f, menuMin.y + 32.f), IM_COL32(235, 242, 255, 170), 3.f);
-    draw->AddLine(ImVec2(menuMin.x + 18.f, menuMin.y + 44.f), ImVec2(menuMin.x + 34.f, menuMin.y + 44.f), IM_COL32(235, 242, 255, 135), 3.f);
+    draw->AddLine(ImVec2(menuMin.x + 20.f, menuMin.y + 23.f), ImVec2(menuMin.x + 54.f, menuMin.y + 23.f), IM_COL32(235, 242, 255, 230), 3.4f);
+    draw->AddLine(ImVec2(menuMin.x + 20.f, menuMin.y + 37.f), ImVec2(menuMin.x + 48.f, menuMin.y + 37.f), IM_COL32(235, 242, 255, 185), 3.4f);
+    draw->AddLine(ImVec2(menuMin.x + 20.f, menuMin.y + 51.f), ImVec2(menuMin.x + 42.f, menuMin.y + 51.f), IM_COL32(235, 242, 255, 150), 3.4f);
 
-    const ImVec2 backMin(centerX - 184.f, buttonY + 2.f);
-    const ImVec2 backMax(backMin.x + 100.f, buttonY + 78.f);
-    const ImVec2 playMin(centerX - 58.f, buttonY - 6.f);
-    const ImVec2 playMax(playMin.x + 116.f, buttonY + 88.f);
-    const ImVec2 forwardMin(centerX + 84.f, buttonY + 2.f);
-    const ImVec2 forwardMax(forwardMin.x + 100.f, buttonY + 78.f);
+    const ImVec2 backMin(centerX - 198.f, buttonY + 0.f);
+    const ImVec2 backMax(backMin.x + 108.f, buttonY + 82.f);
+    const ImVec2 playMin(centerX - 64.f, buttonY - 8.f);
+    const ImVec2 playMax(playMin.x + 128.f, buttonY + 94.f);
+    const ImVec2 forwardMin(centerX + 90.f, buttonY + 0.f);
+    const ImVec2 forwardMax(forwardMin.x + 108.f, buttonY + 82.f);
     if (drawIconButton("DDDVR_BTN_BACK", backMin, backMax, 0)) seekBackRequested_ = true;
     if (drawIconButton("DDDVR_BTN_PLAY", playMin, playMax, 1)) playPauseRequested_ = true;
     if (drawIconButton("DDDVR_BTN_FORWARD", forwardMin, forwardMax, 2)) seekForwardRequested_ = true;
@@ -244,13 +245,13 @@ void VrPlayerPanel::draw() {
         draw->AddText(ImVec2((min.x + max.x - textSize.x) * 0.5f, (min.y + max.y - textSize.y) * 0.5f), IM_COL32(222, 234, 250, panelMode_ == VrPlayerPanelMode::Normal ? 232 : 145), label);
         return clicked;
     };
-    const ImVec2 audioMin(panelMax.x - 278.f, buttonY + 8.f);
-    const ImVec2 audioMax(audioMin.x + 92.f, buttonY + 66.f);
+    const ImVec2 audioMin(panelMax.x - 388.f, buttonY + 5.f);
+    const ImVec2 audioMax(audioMin.x + 126.f, buttonY + 75.f);
     if (drawChip("DDDVR_CHIP_AUDIO", "AUDIO", audioMin, audioMax)) {
         audioPopupOpen_ = !audioPopupOpen_;
     }
-    drawChip("DDDVR_CHIP_STEREO", state_.stereoModeLabel.empty() ? "2D" : state_.stereoModeLabel.c_str(), ImVec2(panelMax.x - 172.f, buttonY + 8.f), ImVec2(panelMax.x - 104.f, buttonY + 66.f));
-    drawChip("DDDVR_CHIP_MORE", "*", ImVec2(panelMax.x - 88.f, buttonY + 8.f), ImVec2(panelMax.x - 36.f, buttonY + 66.f));
+    drawChip("DDDVR_CHIP_STEREO", state_.stereoModeLabel.empty() ? "2D" : state_.stereoModeLabel.c_str(), ImVec2(panelMax.x - 244.f, buttonY + 5.f), ImVec2(panelMax.x - 140.f, buttonY + 75.f));
+    drawChip("DDDVR_CHIP_MORE", "...", ImVec2(panelMax.x - 118.f, buttonY + 5.f), ImVec2(panelMax.x - 42.f, buttonY + 75.f));
 
     if (panelMode_ != VrPlayerPanelMode::Normal || timelineHovered || timelineActive) {
         const float previewProgress = panelMode_ != VrPlayerPanelMode::Normal ? scrubPreviewProgress_ : timelinePreviewProgress;
@@ -277,25 +278,37 @@ void VrPlayerPanel::draw() {
     }
 
     if (audioPopupOpen_) {
-        const ImVec2 popupMin(panelMin.x - 214.f, panelMin.y + 38.f);
-        const ImVec2 popupMax(popupMin.x + 430.f, popupMin.y + 188.f);
+        const ImVec2 popupMin(panelMin.x + 28.f, 22.f);
+        const ImVec2 popupMax(popupMin.x + 520.f, popupMin.y + 102.f + 48.f * static_cast<float>(std::max<size_t>(state_.audioTrackLabels.size(), 1)));
         draw->AddRectFilled(popupMin, popupMax, IM_COL32(10, 12, 18, 238), 22.f);
         draw->AddRect(popupMin, popupMax, IM_COL32(220, 235, 255, 58), 22.f, 0, 1.1f);
         draw->AddText(ImVec2(popupMin.x + 24.f, popupMin.y + 20.f), IM_COL32(245, 247, 255, 255), "Audio tracks");
-        const char* rows[] = {"1 / rus / DUB", "2 / rus / MVO", "3 / eng"};
-        for (int i = 0; i < 3; ++i) {
-            const ImVec2 rowMin(popupMin.x + 18.f, popupMin.y + 62.f + i * 38.f);
-            const ImVec2 rowMax(popupMax.x - 18.f, rowMin.y + 32.f);
+        const int rowCount = static_cast<int>(std::max<size_t>(state_.audioTrackLabels.size(), 1));
+        for (int i = 0; i < rowCount; ++i) {
+            const ImVec2 rowMin(popupMin.x + 18.f, popupMin.y + 64.f + i * 48.f);
+            const ImVec2 rowMax(popupMax.x - 18.f, rowMin.y + 40.f);
+            ImGui::PushID(i);
             ImGui::SetCursorScreenPos(rowMin);
-            ImGui::InvisibleButton(i == 0 ? "DDDVR_AUDIO_0" : (i == 1 ? "DDDVR_AUDIO_1" : "DDDVR_AUDIO_2"), ImVec2(rowMax.x - rowMin.x, rowMax.y - rowMin.y));
+            ImGui::InvisibleButton("DDDVR_AUDIO_ROW", ImVec2(rowMax.x - rowMin.x, rowMax.y - rowMin.y));
             const bool hovered = ImGui::IsItemHovered();
-            if (hovered || i == 0) {
-                draw->AddRectFilled(rowMin, rowMax, i == 0 ? IM_COL32(220, 230, 245, 220) : IM_COL32(74, 132, 198, 170), 10.f);
+            const bool selected = i == state_.selectedAudioTrackIndex;
+            if (hovered || selected) {
+                draw->AddRectFilled(rowMin, rowMax, selected ? IM_COL32(220, 230, 245, 220) : IM_COL32(74, 132, 198, 170), 10.f);
             }
-            draw->AddText(ImVec2(rowMin.x + 14.f, rowMin.y + 7.f), i == 0 ? IM_COL32(12, 16, 24, 255) : IM_COL32(226, 236, 250, 245), rows[i]);
+            const std::string rowLabel = state_.audioTrackLabels.empty()
+                ? std::string("No audio tracks")
+                : state_.audioTrackLabels[static_cast<size_t>(i)];
+            draw->PushClipRect(ImVec2(rowMin.x + 14.f, rowMin.y), ImVec2(rowMax.x - 10.f, rowMax.y), true);
+            draw->AddText(ImVec2(rowMin.x + 14.f, rowMin.y + 9.f), selected ? IM_COL32(12, 16, 24, 255) : IM_COL32(226, 236, 250, 245), rowLabel.c_str());
+            draw->PopClipRect();
             if (ImGui::IsItemClicked(0)) {
+                if (!state_.audioTrackLabels.empty()) {
+                    audioTrackSelected_ = true;
+                    requestedAudioTrackIndex_ = i;
+                }
                 audioPopupOpen_ = false;
             }
+            ImGui::PopID();
         }
         if (ImGui::IsMouseClicked(0) &&
             !pointInRect(mouse, popupMin, popupMax) &&
@@ -345,6 +358,16 @@ bool VrPlayerPanel::consumeTimelineSeekRequested(int64_t* outPositionMs) {
         *outPositionMs = requestedTimelinePositionMs_;
     }
     timelineSeekRequested_ = false;
+    return value;
+}
+
+bool VrPlayerPanel::consumeAudioTrackSelected(int* outTrackIndex) {
+    const bool value = audioTrackSelected_;
+    if (value && outTrackIndex != nullptr) {
+        *outTrackIndex = requestedAudioTrackIndex_;
+    }
+    audioTrackSelected_ = false;
+    requestedAudioTrackIndex_ = -1;
     return value;
 }
 

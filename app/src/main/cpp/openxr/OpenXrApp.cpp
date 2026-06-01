@@ -55,6 +55,11 @@ void OpenXrApp::setJavaBridge(JNIEnv* env, jobject bridge) {
         "onTimelineSeekFromNative",
         "(I)V"
     );
+    bridgeOnAudioTrackSelected_ = env->GetMethodID(
+        bridgeClass,
+        "onAudioTrackSelectedFromNative",
+        "(I)V"
+    );
     env->DeleteLocalRef(bridgeClass);
 
     jclass localVideoSurfaceClass = env->FindClass("top/rootu/dddvr/xr/bridge/OpenXrVideoSurface");
@@ -80,6 +85,7 @@ void OpenXrApp::setJavaBridge(JNIEnv* env, jobject bridge) {
         bridgeOnVideoSurfaceReady_ != nullptr &&
         bridgeOnInputAction_ != nullptr &&
         bridgeOnTimelineSeek_ != nullptr &&
+        bridgeOnAudioTrackSelected_ != nullptr &&
         videoSurfaceCtor_ != nullptr &&
         videoSurfaceGetSurface_ != nullptr &&
         videoSurfaceUpdateTexImage_ != nullptr &&
@@ -95,8 +101,32 @@ void OpenXrApp::setVideoSize(int32_t width, int32_t height) {
     XR_LOGI("DDDVR/OpenXRVideo", "XR_VIDEO_SIZE_PENDING width=%d height=%d", width, height);
 }
 
-void OpenXrApp::setUiState(bool visible, int32_t progressPermille, bool playing) {
-    renderer_.setUiState(visible, progressPermille, playing);
+void OpenXrApp::setUiState(
+    bool visible,
+    bool playing,
+    bool buffering,
+    int64_t positionMs,
+    int64_t durationMs,
+    int64_t bufferedPositionMs,
+    const std::string& title,
+    const std::string& stereoModeLabel,
+    const std::string& audioTrackLabel,
+    const std::vector<std::string>& audioTrackLabels,
+    int selectedAudioTrackIndex
+) {
+    renderer_.setUiState(
+        visible,
+        playing,
+        buffering,
+        positionMs,
+        durationMs,
+        bufferedPositionMs,
+        title,
+        stereoModeLabel,
+        audioTrackLabel,
+        audioTrackLabels,
+        selectedAudioTrackIndex
+    );
 }
 
 bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init deferred to render thread"); return true; }
@@ -335,6 +365,13 @@ void OpenXrApp::loop() {
                 }
                 dispatchTimelineSeekOnRenderThread(uiProgressPermille);
             }
+            int uiAudioTrackIndex = -1;
+            while (renderer_.consumeUiAudioTrackSelection(&uiAudioTrackIndex)) {
+                if (uiHand >= 0) {
+                    input_.markTriggerConsumedByUi(uiHand);
+                }
+                dispatchAudioTrackSelectedOnRenderThread(uiAudioTrackIndex);
+            }
 #if defined(DDDVR_LEGACY_PRIMITIVE_UI)
             {
                 CinemaUiHoverTarget hoverTarget = CinemaUiHoverTarget::None;
@@ -506,6 +543,23 @@ void OpenXrApp::dispatchTimelineSeekOnRenderThread(int32_t progressPermille) {
     detachCurrentThread(didAttach);
 }
 
+void OpenXrApp::dispatchAudioTrackSelectedOnRenderThread(int32_t trackIndex) {
+    if (javaBridgeRef_ == nullptr || bridgeOnAudioTrackSelected_ == nullptr) return;
+    if (trackIndex < 0) return;
+    bool didAttach = false;
+    JNIEnv* env = attachCurrentThread(&didAttach);
+    if (env == nullptr) return;
+    env->CallVoidMethod(javaBridgeRef_, bridgeOnAudioTrackSelected_, static_cast<jint>(trackIndex));
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        XR_LOGE("DDDVR/OpenXRInput", "XR_AUDIO_TRACK_CALLBACK_FAILED index=%d", trackIndex);
+    } else {
+        XR_LOGI("DDDVR/OpenXRInput", "XR_AUDIO_TRACK_DISPATCH index=%d", trackIndex);
+    }
+    detachCurrentThread(didAttach);
+}
+
 bool OpenXrApp::createVideoSurfaceOnRenderThread() {
     if (javaBridgeRef_ == nullptr || videoSurfaceClass_ == nullptr || videoSurfaceRef_ != nullptr) {
         XR_LOGI("DDDVR/OpenXRVideo", "XR_VIDEO_SURFACE_CREATE_SKIPPED bridge=%p class=%p surface=%p",
@@ -660,6 +714,7 @@ void OpenXrApp::releaseJavaRefs() {
     bridgeOnVideoSurfaceReady_ = nullptr;
     bridgeOnInputAction_ = nullptr;
     bridgeOnTimelineSeek_ = nullptr;
+    bridgeOnAudioTrackSelected_ = nullptr;
     videoSurfaceCtor_ = nullptr;
     videoSurfaceGetSurface_ = nullptr;
     videoSurfaceUpdateTexImage_ = nullptr;

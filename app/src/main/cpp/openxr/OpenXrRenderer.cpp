@@ -145,8 +145,9 @@ bool OpenXrRenderer::initialize(const OpenXrRenderConfig& config){
         state.visible = true;
         state.playing = false;
         state.title = "DDD-VR OpenXR Player";
-        state.stereoModeLabel = "ImGui test panel";
+        state.stereoModeLabel = "2D";
         state.durationMs = 1000;
+        std::lock_guard<std::mutex> lock(playerPanelMutex_);
         playerPanel_.setState(state);
     } else {
         XR_LOGE("DDDVR/OpenXRUi", "CURRENT_BLOCKER XR_UI_BACKEND_INIT_FAILED");
@@ -164,21 +165,44 @@ void OpenXrRenderer::setVideoFrameState(const float* transformMatrix, bool hasVi
     hasVideoFrame_ = hasVideoFrame_ || hasVideo;
 }
 
-void OpenXrRenderer::setUiState(bool visible, int progressPermille, bool playing) {
+void OpenXrRenderer::setUiState(
+    bool visible,
+    bool playing,
+    bool buffering,
+    int64_t positionMs,
+    int64_t durationMs,
+    int64_t bufferedPositionMs,
+    const std::string& title,
+    const std::string& stereoModeLabel,
+    const std::string& audioTrackLabel,
+    const std::vector<std::string>& audioTrackLabels,
+    int selectedAudioTrackIndex
+) {
+    if (durationMs < 0) durationMs = 0;
+    if (positionMs < 0) positionMs = 0;
+    if (durationMs > 0 && positionMs > durationMs) positionMs = durationMs;
+    if (bufferedPositionMs < 0) bufferedPositionMs = 0;
+    if (durationMs > 0 && bufferedPositionMs > durationMs) bufferedPositionMs = durationMs;
+    const int progressPermille = durationMs > 0
+        ? static_cast<int>((positionMs * 1000) / durationMs)
+        : 0;
     uiVisible_.store(visible);
-    if (progressPermille < 0) progressPermille = 0;
-    if (progressPermille > 1000) progressPermille = 1000;
     uiProgressPermille_.store(progressPermille);
     uiPlaying_.store(playing);
 
     VrPlayerUiState state{};
     state.visible = visible;
     state.playing = playing;
-    state.title = "DDD-VR OpenXR Player";
-    state.stereoModeLabel = "ImGui backend";
-    state.positionMs = progressPermille;
-    state.durationMs = 1000;
-    state.bufferedPositionMs = progressPermille;
+    state.buffering = buffering;
+    state.positionMs = positionMs;
+    state.durationMs = durationMs;
+    state.bufferedPositionMs = bufferedPositionMs;
+    state.title = title;
+    state.stereoModeLabel = stereoModeLabel;
+    state.audioTrackLabel = audioTrackLabel;
+    state.audioTrackLabels = audioTrackLabels;
+    state.selectedAudioTrackIndex = selectedAudioTrackIndex;
+    std::lock_guard<std::mutex> lock(playerPanelMutex_);
     playerPanel_.setState(state);
 }
 
@@ -288,6 +312,14 @@ bool OpenXrRenderer::consumeUiTimelineSeek(int* outProgressPermille) {
     if (!pendingUiTimelineSeek_ || outProgressPermille == nullptr) return false;
     pendingUiTimelineSeek_ = false;
     *outProgressPermille = pendingUiTimelineProgressPermille_;
+    return true;
+}
+
+bool OpenXrRenderer::consumeUiAudioTrackSelection(int* outTrackIndex) {
+    if (!pendingUiAudioTrackSelected_ || outTrackIndex == nullptr) return false;
+    pendingUiAudioTrackSelected_ = false;
+    *outTrackIndex = pendingUiAudioTrackIndex_;
+    pendingUiAudioTrackIndex_ = -1;
     return true;
 }
 
@@ -715,6 +747,7 @@ void OpenXrRenderer::updateUiTexture() {
     lastUiFrameTime_ = now;
     updateUiPlane(deltaSeconds);
     uiBackend_.beginFrame(deltaSeconds);
+    std::lock_guard<std::mutex> lock(playerPanelMutex_);
     playerPanel_.draw();
     queuePlayerPanelActions();
     uiBackend_.endFrame();
@@ -756,6 +789,12 @@ void OpenXrRenderer::queuePlayerPanelActions() {
             lastUiTimelineSeekQueued_ = now;
             XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_to progress=%d", progressPermille);
         }
+    }
+    int audioTrackIndex = -1;
+    if (playerPanel_.consumeAudioTrackSelected(&audioTrackIndex)) {
+        pendingUiAudioTrackIndex_ = audioTrackIndex;
+        pendingUiAudioTrackSelected_ = true;
+        XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION audio_track index=%d", audioTrackIndex);
     }
 }
 

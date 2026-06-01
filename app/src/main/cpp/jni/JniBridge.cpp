@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <memory>
 #include <string>
+#include <vector>
 #include "../openxr/OpenXrApp.h"
 #include "../openxr/OpenXrLoader.h"
 #include "../util/XrLog.h"
@@ -12,6 +13,19 @@ std::string toString(JNIEnv* env, jstring value) {
     if (chars == nullptr) return {};
     std::string out(chars);
     env->ReleaseStringUTFChars(value, chars);
+    return out;
+}
+
+std::vector<std::string> toStringVector(JNIEnv* env, jobjectArray values) {
+    std::vector<std::string> out;
+    if (env == nullptr || values == nullptr) return out;
+    const jsize count = env->GetArrayLength(values);
+    out.reserve(static_cast<size_t>(count));
+    for (jsize i = 0; i < count; ++i) {
+        auto value = reinterpret_cast<jstring>(env->GetObjectArrayElement(values, i));
+        out.push_back(toString(env, value));
+        if (value != nullptr) env->DeleteLocalRef(value);
+    }
     return out;
 }
 
@@ -109,9 +123,38 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativePause(JNIEnv*, jobject, jlong 
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetVideoSize(JNIEnv*, jobject, jlong handle, jint width, jint height) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->setVideoSize(width, height); }
 extern "C" JNIEXPORT void JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetUiState(JNIEnv*, jobject, jlong handle, jboolean visible, jint progressPermille, jboolean playing) {
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetUiState(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jboolean visible,
+    jboolean playing,
+    jboolean buffering,
+    jlong positionMs,
+    jlong durationMs,
+    jlong bufferedPositionMs,
+    jstring title,
+    jstring stereoModeLabel,
+    jstring audioTrackLabel,
+    jobjectArray audioTrackLabels,
+    jint selectedAudioTrackIndex
+) {
     auto* app = reinterpret_cast<OpenXrApp*>(handle);
-    if (app) app->setUiState(visible == JNI_TRUE, progressPermille, playing == JNI_TRUE);
+    if (app) {
+        app->setUiState(
+            visible == JNI_TRUE,
+            playing == JNI_TRUE,
+            buffering == JNI_TRUE,
+            static_cast<int64_t>(positionMs),
+            static_cast<int64_t>(durationMs),
+            static_cast<int64_t>(bufferedPositionMs),
+            toString(env, title),
+            toString(env, stereoModeLabel),
+            toString(env, audioTrackLabel),
+            toStringVector(env, audioTrackLabels),
+            static_cast<int>(selectedAudioTrackIndex)
+        );
+    }
 }
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeDestroy(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativeDestroy called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (!app) return; app->destroy(); delete app; }

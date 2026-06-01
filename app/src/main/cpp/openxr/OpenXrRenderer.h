@@ -9,6 +9,9 @@
 #include <GLES3/gl3.h>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+#include <string>
+#include <vector>
 
 enum class OpenXrStereoMode {
     Mono,
@@ -30,12 +33,25 @@ class OpenXrRenderer {
 public:
     bool initialize(const OpenXrRenderConfig& config);
     void setVideoFrameState(const float* transformMatrix, bool hasVideo);
-    void setUiState(bool visible, int progressPermille, bool playing);
+    void setUiState(
+        bool visible,
+        bool playing,
+        bool buffering,
+        int64_t positionMs,
+        int64_t durationMs,
+        int64_t bufferedPositionMs,
+        const std::string& title,
+        const std::string& stereoModeLabel,
+        const std::string& audioTrackLabel,
+        const std::vector<std::string>& audioTrackLabels,
+        int selectedAudioTrackIndex
+    );
     void setPointerRays(const OpenXrPointerRay rays[2]);
     void updateUiInteraction(const OpenXrPointerRay rays[2], const bool triggerPressed[2], bool active);
     int activeUiPointerHand() const { return activeUiPointerHand_; }
     bool consumeUiInputAction(OpenXrInputActionCode* outAction);
     bool consumeUiTimelineSeek(int* outProgressPermille);
+    bool consumeUiAudioTrackSelection(int* outTrackIndex);
     void setPlayerHoverTarget(CinemaUiHoverTarget target);
     bool updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters);
     bool seekProgressFromPointer(const XrPosef& aimPose, int* outProgressPermille);
@@ -77,7 +93,9 @@ private:
     bool pendingUiSeekBack_ = false;
     bool pendingUiSeekForward_ = false;
     bool pendingUiTimelineSeek_ = false;
+    bool pendingUiAudioTrackSelected_ = false;
     int pendingUiTimelineProgressPermille_ = 0;
+    int pendingUiAudioTrackIndex_ = -1;
     int lastUiTimelineQueuedProgressPermille_ = -1;
     std::chrono::steady_clock::time_point lastUiTimelineSeekQueued_{};
     float screenYawRadians_ = 0.f;
@@ -103,6 +121,7 @@ private:
         0.f, 0.f, 0.f, 1.f
     };
     bool hasVideoFrame_ = false;
+    std::mutex playerPanelMutex_;
     std::atomic<bool> uiVisible_{true};
     std::atomic<int> uiProgressPermille_{0};
     std::atomic<bool> uiPlaying_{false};

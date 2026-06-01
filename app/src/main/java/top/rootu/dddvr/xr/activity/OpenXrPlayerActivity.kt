@@ -9,12 +9,17 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.Surface
 import android.view.WindowManager
+import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import top.rootu.dddvr.core.playback.PlaybackSession
+import top.rootu.dddvr.logic.TrackLogic
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
+import top.rootu.dddvr.viewmodel.TrackOption
 import top.rootu.dddvr.vr.activity.VrIntentParser
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
 import top.rootu.dddvr.vr.input.VrControllerInputMapper
@@ -40,6 +45,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     }
     private var activeSurface: Surface? = null
     private var playbackRequest: VrPlaybackRequest? = null
+    private lateinit var playbackConfig: OpenXrPlaybackConfig
+    private var audioOptions: List<TrackOption> = emptyList()
+    private var selectedAudioTrackIndex = 0
     private var initialized = false
     private var playerInitialized = false
     private var smokeOnly = false
@@ -71,6 +79,10 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             updateOpenXrUiState("is_playing_$isPlaying")
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+            updateAudioTrackOptions("tracks_changed")
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             if (recoverFromSourceError(error)) return
             Log.e(TAG, "XR_PLAYER_FATAL code=${error.errorCodeName} message=${error.message}", error)
@@ -95,16 +107,16 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             saveLastPlaybackRequest(parsedRequest)
         }
 
-        val config = request?.let { OpenXrPlaybackConfig.from(it) }
+        playbackConfig = request?.let { OpenXrPlaybackConfig.from(it) }
             ?: OpenXrPlaybackConfig(
                 stereoMode = StereoInputMode.MONO,
                 swapEyes = false,
                 screenMode = OpenXrScreenMode.FLAT,
                 startPositionMs = 0L
             )
-        OpenXrDebugOverlay.logStartup(config)
+        OpenXrDebugOverlay.logStartup(playbackConfig)
 
-        bridge = OpenXrBridge(this, this, config)
+        bridge = OpenXrBridge(this, this, playbackConfig)
         Log.i(TAG, "ACTIVITY_ON_CREATE_END")
     }
 
@@ -407,7 +419,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         pausedBeforeXrStart = false
         runCatching { bridge.onResume() }
             .onFailure { Log.e(TAG, "Unable to resume OpenXR bridge after start", it) }
-        bridge.setUiState(openXrUiVisible, 0, false)
+        updateOpenXrUiState("xr_started")
         mainHandler.removeCallbacks(uiStateRunnable)
         mainHandler.post(uiStateRunnable)
         schedulePlayerStart("xr_started")
@@ -449,6 +461,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         }
         playerManager.onVideoFormatChanged = { format -> onVideoFormatChanged(format) }
         playerManager.onAudioOutputFormatChanged = { info -> Log.i(TAG, "XR_AUDIO_FORMAT $info") }
+        playerManager.onMetadataAvailable = { updateAudioTrackOptions("metadata_available") }
         playbackSession = PlaybackSession(playerManager)
         playerInitialized = true
         playerManager.loadPlaylist(
@@ -457,6 +470,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             request.startPositionMs
         )
         activeSurface?.let { playbackSession.attachSurface(it) }
+        updateAudioTrackOptions("player_start")
         updateOpenXrUiState("player_start_end")
         Log.i(TAG, "PLAYER_START_END")
     }
@@ -547,17 +561,88 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private fun updateOpenXrUiState(reason: String) {
         if (!::bridge.isInitialized) return
         val playing = !smokeOnly && playerInitialized && playbackSession.isPlaying
-        val progress = if (!smokeOnly && playerInitialized) {
-            val duration = playbackSession.durationMs
-            val position = playbackSession.currentPositionMs
-            if (duration > 0L) ((position * 1000L) / duration).toInt() else 0
-        } else {
-            0
-        }
-        bridge.setUiState(openXrUiVisible, progress, playing)
+        val buffering = !smokeOnly &&
+            playerInitialized &&
+            playerManager.exoPlayer?.playbackState == Player.STATE_BUFFERING
+        val positionMs = if (!smokeOnly && playerInitialized) playbackSession.currentPositionMs else 0L
+        val durationMs = if (!smokeOnly && playerInitialized) playbackSession.durationMs.coerceAtLeast(0L) else 0L
+        val bufferedPositionMs = if (!smokeOnly && playerInitialized) playbackSession.bufferedPositionMs.coerceAtLeast(0L) else 0L
+        val title = playbackRequest?.title?.takeIf { it.isNotBlank() } ?: "DDD-VR OpenXR Player"
+        val audioLabels = audioOptions.map { TrackLogic.buildTrackLabel(it, this) }.toTypedArray()
+        val selectedAudioLabel = audioLabels.getOrNull(selectedAudioTrackIndex).orEmpty()
+        bridge.setUiState(
+            visible = openXrUiVisible,
+            playing = playing,
+            buffering = buffering,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            bufferedPositionMs = bufferedPositionMs,
+            title = title,
+            stereoModeLabel = stereoModeLabel(),
+            audioTrackLabel = selectedAudioLabel,
+            audioTrackLabels = audioLabels,
+            selectedAudioTrackIndex = selectedAudioTrackIndex
+        )
         if (reason != "tick") {
-            Log.i(TAG, "XR_UI_STATE reason=$reason visible=$openXrUiVisible progress=$progress playing=$playing")
+            Log.i(
+                TAG,
+                "XR_UI_STATE reason=$reason visible=$openXrUiVisible positionMs=$positionMs " +
+                    "durationMs=$durationMs bufferedMs=$bufferedPositionMs playing=$playing " +
+                    "buffering=$buffering audioTracks=${audioLabels.size} selectedAudio=$selectedAudioTrackIndex"
+            )
         }
+    }
+
+    private fun updateAudioTrackOptions(reason: String) {
+        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
+        val player = playerManager.exoPlayer ?: return
+        val (tracks, selectedIndex) = TrackLogic.extractAudioTracks(
+            player.currentTracks,
+            playerManager.getTrackMetadata()
+        )
+        audioOptions = tracks
+        selectedAudioTrackIndex = selectedIndex.coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
+        Log.i(TAG, "XR_AUDIO_TRACKS_UPDATE reason=$reason count=${audioOptions.size} selected=$selectedAudioTrackIndex")
+        updateOpenXrUiState("audio_tracks_$reason")
+    }
+
+    private fun stereoModeLabel(): String {
+        return when (playbackConfig.stereoMode) {
+            StereoInputMode.SBS -> "SBS"
+            StereoInputMode.SBS_REVERSED -> "SBS-R"
+            StereoInputMode.OU -> "OU"
+            StereoInputMode.OU_REVERSED -> "OU-R"
+            else -> "2D"
+        }
+    }
+
+    private fun applyAudioTrackSelection(index: Int) {
+        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
+        if (index !in audioOptions.indices) {
+            Log.w(TAG, "XR_AUDIO_TRACK_SELECT_IGNORED invalid=$index count=${audioOptions.size}")
+            return
+        }
+        val option = audioOptions[index]
+        val player = playerManager.exoPlayer ?: return
+        val builder = player.trackSelectionParameters.buildUpon()
+        if (option.isOff) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+        } else {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            option.group?.let { group ->
+                builder.setOverrideForType(
+                    TrackSelectionOverride(
+                        group.mediaTrackGroup,
+                        option.trackIndex
+                    )
+                )
+            }
+        }
+        player.trackSelectionParameters = builder.build()
+        selectedAudioTrackIndex = index
+        openXrUiVisible = true
+        Log.i(TAG, "XR_AUDIO_TRACK_SELECTED index=$index label=${TrackLogic.buildTrackLabel(option, this)}")
+        updateOpenXrUiState("audio_track_selected")
     }
 
     private fun saveLastPlaybackRequest(request: VrPlaybackRequest) {
@@ -617,6 +702,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             Log.i(TAG, "XR_TIMELINE_SEEK_APPLIED progress=$progressPermille positionMs=$positionMs durationMs=$duration")
         }
     }
+    override fun onSelectAudioTrack(trackIndex: Int) { applyAudioTrackSelection(trackIndex) }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
     override fun onShowMenu() {
         openXrUiVisible = !openXrUiVisible
@@ -630,7 +716,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         private const val FIRST_XR_START_DELAY_MS = 0L
         private const val XR_RETRY_DELAY_MS = 500L
         private const val PLAYER_START_DELAY_MS = 200L
-        private const val UI_STATE_UPDATE_MS = 1_000L
+        private const val UI_STATE_UPDATE_MS = 250L
         private const val MAX_NOT_RESUMED_RETRIES = 5
         private const val MAX_SOURCE_ERROR_RETRIES = 20
         private const val SOURCE_ERROR_RETRY_DELAY_MS = 500L

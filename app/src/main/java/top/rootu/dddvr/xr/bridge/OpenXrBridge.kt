@@ -47,9 +47,34 @@ class OpenXrBridge(
         nativeSetVideoSize(nativeHandle, width, height)
     }
 
-    fun setUiState(visible: Boolean, progressPermille: Int, playing: Boolean) {
+    fun setUiState(
+        visible: Boolean,
+        playing: Boolean,
+        buffering: Boolean,
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        title: String,
+        stereoModeLabel: String,
+        audioTrackLabel: String,
+        audioTrackLabels: Array<String>,
+        selectedAudioTrackIndex: Int
+    ) {
         if (nativeHandle == 0L) return
-        nativeSetUiState(nativeHandle, visible, progressPermille.coerceIn(0, 1000), playing)
+        nativeSetUiState(
+            nativeHandle,
+            visible,
+            playing,
+            buffering,
+            positionMs.coerceAtLeast(0L),
+            durationMs.coerceAtLeast(0L),
+            bufferedPositionMs.coerceAtLeast(0L),
+            title,
+            stereoModeLabel,
+            audioTrackLabel,
+            audioTrackLabels,
+            selectedAudioTrackIndex
+        )
     }
 
     fun destroy() {
@@ -85,6 +110,11 @@ class OpenXrBridge(
     }
 
     @Suppress("unused")
+    private fun onAudioTrackSelectedFromNative(trackIndex: Int) {
+        mainHandler.post { callbacks.onSelectAudioTrack(trackIndex) }
+    }
+
+    @Suppress("unused")
     private fun onNativeLog(message: String) {
         Log.i("DDDVR/OpenXR", message)
     }
@@ -94,6 +124,7 @@ class OpenXrBridge(
         fun onPlayPause()
         fun onSeekBy(deltaMs: Long)
         fun onSeekToProgress(progressPermille: Int)
+        fun onSelectAudioTrack(trackIndex: Int)
         fun onRecenter()
         fun onShowMenu()
         fun onExit()
@@ -104,7 +135,20 @@ class OpenXrBridge(
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativeSetVideoSize(handle: Long, width: Int, height: Int)
-    private external fun nativeSetUiState(handle: Long, visible: Boolean, progressPermille: Int, playing: Boolean)
+    private external fun nativeSetUiState(
+        handle: Long,
+        visible: Boolean,
+        playing: Boolean,
+        buffering: Boolean,
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        title: String,
+        stereoModeLabel: String,
+        audioTrackLabel: String,
+        audioTrackLabels: Array<String>,
+        selectedAudioTrackIndex: Int
+    )
     private external fun nativeDestroy(handle: Long)
 
     companion object {
