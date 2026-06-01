@@ -1,8 +1,10 @@
 #include "OpenXrRenderer.h"
 #include "../util/XrLog.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace {
 constexpr float kMinScreenDistanceMeters = 1.5f;
@@ -24,11 +26,14 @@ constexpr float kUiPlayButtonHeightMeters = 0.18f;
 constexpr float kUiPlayButtonYOffsetMeters = 0.055f;
 constexpr int kImGuiUiTextureWidth = 1600;
 constexpr int kImGuiUiTextureHeight = 520;
-constexpr float kImGuiPanelWidthScale = 0.58f;
-constexpr float kImGuiPanelMaxWidthMeters = 2.85f;
-constexpr float kImGuiPanelHeightMeters = 0.48f;
-constexpr float kImGuiPanelDownScale = 0.58f;
+constexpr float kImGuiPanelWidthScale = 0.60f;
+constexpr float kImGuiPanelMaxWidthMeters = 2.70f;
+constexpr float kImGuiPanelHeightMeters = 0.88f;
+constexpr float kImGuiPanelModalHeightMeters = 1.18f;
+constexpr float kImGuiPanelDownScale = 0.64f;
+constexpr float kImGuiPanelModalDownScale = 0.46f;
 constexpr float kImGuiPanelForwardOffsetMeters = 0.10f;
+constexpr float kImGuiPanelModalForwardOffsetMeters = 0.16f;
 constexpr float kImGuiPanelFollowResponse = 14.0f;
 
 std::array<float, 16> multiply(const std::array<float, 16>& a, const std::array<float, 16>& b) {
@@ -145,8 +150,9 @@ bool OpenXrRenderer::initialize(const OpenXrRenderConfig& config){
         state.visible = true;
         state.playing = false;
         state.title = "DDD-VR OpenXR Player";
-        state.stereoModeLabel = "2D";
+        state.projectionModeLabel = "2D";
         state.durationMs = 1000;
+        uiModalOpen_.store(false);
         std::lock_guard<std::mutex> lock(playerPanelMutex_);
         playerPanel_.setState(state);
     } else {
@@ -198,10 +204,30 @@ void OpenXrRenderer::setUiState(
     state.durationMs = durationMs;
     state.bufferedPositionMs = bufferedPositionMs;
     state.title = title;
-    state.stereoModeLabel = stereoModeLabel;
+    state.projectionModeLabel = stereoModeLabel;
     state.audioTrackLabel = audioTrackLabel;
     state.audioTrackLabels = audioTrackLabels;
     state.selectedAudioTrackIndex = selectedAudioTrackIndex;
+    for (size_t i = 0; i < audioTrackLabels.size(); ++i) {
+        VrTrackRow row{};
+        row.id = "legacy_audio:" + std::to_string(i);
+        row.title = audioTrackLabels[i];
+        row.selected = static_cast<int>(i) == selectedAudioTrackIndex;
+        state.audioTracks.push_back(std::move(row));
+    }
+    uiModalOpen_.store(state.activeModal != VrPlayerModal::None);
+    std::lock_guard<std::mutex> lock(playerPanelMutex_);
+    playerPanel_.setState(state);
+}
+
+void OpenXrRenderer::setPlayerUiState(const VrPlayerUiState& state) {
+    uiVisible_.store(state.visible);
+    uiPlaying_.store(state.playing);
+    uiModalOpen_.store(state.activeModal != VrPlayerModal::None);
+    const int progressPermille = state.durationMs > 0
+        ? static_cast<int>((std::clamp<int64_t>(state.positionMs, 0, state.durationMs) * 1000) / state.durationMs)
+        : 0;
+    uiProgressPermille_.store(std::clamp(progressPermille, 0, 1000));
     std::lock_guard<std::mutex> lock(playerPanelMutex_);
     playerPanel_.setState(state);
 }
@@ -320,6 +346,13 @@ bool OpenXrRenderer::consumeUiAudioTrackSelection(int* outTrackIndex) {
     pendingUiAudioTrackSelected_ = false;
     *outTrackIndex = pendingUiAudioTrackIndex_;
     pendingUiAudioTrackIndex_ = -1;
+    return true;
+}
+
+bool OpenXrRenderer::consumePlayerPanelAction(VrPlayerPanelAction* outAction) {
+    if (outAction == nullptr || pendingPlayerPanelActions_.empty()) return false;
+    *outAction = pendingPlayerPanelActions_.front();
+    pendingPlayerPanelActions_.erase(pendingPlayerPanelActions_.begin());
     return true;
 }
 
@@ -627,19 +660,22 @@ VrUiPlane OpenXrRenderer::targetUiPlane() const {
     const float screenHeight = config_.screenWidthMeters * (9.f / 16.f);
     const float c = std::cos(screenYawRadians_);
     const float s = std::sin(screenYawRadians_);
+    const bool modalOpen = uiModalOpen_.load();
+    const float forwardOffset = modalOpen ? kImGuiPanelModalForwardOffsetMeters : kImGuiPanelForwardOffsetMeters;
+    const float downScale = modalOpen ? kImGuiPanelModalDownScale : kImGuiPanelDownScale;
     VrUiPlane plane{};
     plane.right = {c, 0.f, s};
     plane.up = {0.f, 1.f, 0.f};
     plane.normal = {-s, 0.f, c};
-    plane.center.x = screenCenterX_ + plane.normal.x * kImGuiPanelForwardOffsetMeters;
-    plane.center.y = screenCenterY_ - screenHeight * kImGuiPanelDownScale;
-    plane.center.z = screenCenterZ_ + plane.normal.z * kImGuiPanelForwardOffsetMeters;
+    plane.center.x = screenCenterX_ + plane.normal.x * forwardOffset;
+    plane.center.y = screenCenterY_ - screenHeight * downScale;
+    plane.center.z = screenCenterZ_ + plane.normal.z * forwardOffset;
     plane.yawRadians = screenYawRadians_;
     const float desiredPanelWidth = config_.screenWidthMeters * kImGuiPanelWidthScale;
     plane.widthMeters = desiredPanelWidth < kImGuiPanelMaxWidthMeters
         ? desiredPanelWidth
         : kImGuiPanelMaxWidthMeters;
-    plane.heightMeters = kImGuiPanelHeightMeters;
+    plane.heightMeters = modalOpen ? kImGuiPanelModalHeightMeters : kImGuiPanelHeightMeters;
     return plane;
 }
 
@@ -796,11 +832,23 @@ void OpenXrRenderer::queuePlayerPanelActions() {
         pendingUiAudioTrackSelected_ = true;
         XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION audio_track index=%d", audioTrackIndex);
     }
+    VrPlayerPanelAction action{};
+    while (playerPanel_.consumeAction(&action)) {
+        pendingPlayerPanelActions_.push_back(action);
+        XR_LOGI(
+            "DDDVR/OpenXRUi",
+            "XR_UI_ACTION panel type=%d int=%d float=%.3f text=%s",
+            static_cast<int>(action.type),
+            action.intValue,
+            action.floatValue,
+            action.stringValue.c_str()
+        );
+    }
 }
 
 void OpenXrRenderer::renderUiCursor(const float* mvp, const VrRayHit& hit, const VrUiPlane& plane) {
     if (!hit.hit) return;
-    const float size = uiPrimaryPressed_ ? 0.028f : 0.020f;
+    const float size = uiPrimaryPressed_ ? 0.036f : 0.026f;
     const float center[3] = {hit.worldX, hit.worldY, hit.worldZ};
     const float right[3] = {plane.right.x, plane.right.y, plane.right.z};
     const float up[3] = {plane.up.x, plane.up.y, plane.up.z};
@@ -863,7 +911,15 @@ void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& vie
             rayHit.hit ? rayHit.worldY : start[1] + direction[1] * 8.f,
             rayHit.hit ? rayHit.worldZ : start[2] + direction[2] * 8.f
         };
-        screen_.renderRay(mvp.data(), start, end, 0.1f, 0.85f, 1.0f);
+        const bool uiHit = uiRayHits_[hand].hit;
+        screen_.renderRay(
+            mvp.data(),
+            start,
+            end,
+            uiHit ? 0.38f : 0.10f,
+            uiHit ? 0.96f : 0.85f,
+            1.0f
+        );
         if (uiRayHits_[hand].hit) {
             renderUiCursor(mvp.data(), uiRayHits_[hand], currentUiPlane());
         } else if (screenRayHits_[hand].hit) {

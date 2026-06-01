@@ -21,8 +21,16 @@ enum class OpenXrStereoMode {
     OuReversed
 };
 
+enum class OpenXrScreenModeNative {
+    Flat,
+    Curved,
+    Vr180,
+    Vr360
+};
+
 struct OpenXrRenderConfig {
     OpenXrStereoMode stereoMode = OpenXrStereoMode::Mono;
+    OpenXrScreenModeNative screenMode = OpenXrScreenModeNative::Flat;
     bool swapEyes = false;
     float screenDistanceMeters = 3.5f;
     float screenWidthMeters = 4.5f;
@@ -46,12 +54,14 @@ public:
         const std::vector<std::string>& audioTrackLabels,
         int selectedAudioTrackIndex
     );
+    void setPlayerUiState(const VrPlayerUiState& state);
     void setPointerRays(const OpenXrPointerRay rays[2]);
     void updateUiInteraction(const OpenXrPointerRay rays[2], const bool triggerPressed[2], bool active);
     int activeUiPointerHand() const { return activeUiPointerHand_; }
     bool consumeUiInputAction(OpenXrInputActionCode* outAction);
     bool consumeUiTimelineSeek(int* outProgressPermille);
     bool consumeUiAudioTrackSelection(int* outTrackIndex);
+    bool consumePlayerPanelAction(VrPlayerPanelAction* outAction);
     void setPlayerHoverTarget(CinemaUiHoverTarget target);
     bool updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters);
     bool seekProgressFromPointer(const XrPosef& aimPose, int* outProgressPermille);
@@ -94,6 +104,7 @@ private:
     bool pendingUiSeekForward_ = false;
     bool pendingUiTimelineSeek_ = false;
     bool pendingUiAudioTrackSelected_ = false;
+    std::vector<VrPlayerPanelAction> pendingPlayerPanelActions_;
     int pendingUiTimelineProgressPermille_ = 0;
     int pendingUiAudioTrackIndex_ = -1;
     int lastUiTimelineQueuedProgressPermille_ = -1;
@@ -123,6 +134,7 @@ private:
     bool hasVideoFrame_ = false;
     std::mutex playerPanelMutex_;
     std::atomic<bool> uiVisible_{true};
+    std::atomic<bool> uiModalOpen_{false};
     std::atomic<int> uiProgressPermille_{0};
     std::atomic<bool> uiPlaying_{false};
     int uiAutoHideFrameBudget_ = 0;

@@ -14,6 +14,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -43,9 +44,12 @@ import okhttp3.OkHttpClient
 import top.rootu.dddvr.App.Companion.USER_AGENT
 import top.rootu.dddvr.data.SettingsRepository
 import top.rootu.dddvr.logic.AudioMixerLogic
+import top.rootu.dddvr.logic.TrackLogic
 import top.rootu.dddvr.logic.UnifiedMetadataReader
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.utils.MediaFormatHelper
+import top.rootu.dddvr.viewmodel.TrackOption
+import top.rootu.dddvr.xr.ui.OpenXrTrackRow
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
@@ -605,6 +609,108 @@ class PlayerManager(
     }
 
     fun getTrackMetadata(): Map<Int, UnifiedMetadataReader.TrackInfo> = currentTrackInfo
+
+    fun getAudioTrackRows(): List<OpenXrTrackRow> {
+        val player = exoPlayer ?: return emptyList()
+        val (options, selectedIndex) = TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
+        return options.mapIndexed { index, option ->
+            option.toOpenXrTrackRow(prefix = "audio", index = index, selectedIndex = selectedIndex)
+        }
+    }
+
+    fun getSubtitleTrackRows(): List<OpenXrTrackRow> {
+        val player = exoPlayer ?: return emptyList()
+        val (options, selectedIndex) = TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
+        return options.mapIndexed { index, option ->
+            option.toOpenXrTrackRow(prefix = "subtitle", index = index, selectedIndex = selectedIndex)
+        }
+    }
+
+    fun currentAudioTrackLabel(): String {
+        val player = exoPlayer ?: return ""
+        val (options, selectedIndex) = TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
+        return options.getOrNull(selectedIndex)?.let { TrackLogic.buildTrackLabel(it, appContext) }.orEmpty()
+    }
+
+    fun currentSubtitleTrackLabel(): String {
+        val player = exoPlayer ?: return ""
+        val (options, selectedIndex) = TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
+        return options.getOrNull(selectedIndex)?.let { TrackLogic.buildTrackLabel(it, appContext) }.orEmpty()
+    }
+
+    fun selectAudioTrack(id: String) {
+        selectTrackById(id = id, prefix = "audio", trackType = C.TRACK_TYPE_AUDIO)
+    }
+
+    fun selectSubtitleTrack(id: String) {
+        selectTrackById(id = id, prefix = "subtitle", trackType = C.TRACK_TYPE_TEXT)
+    }
+
+    fun disableSubtitles() {
+        val player = exoPlayer ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
+    fun enableFirstSubtitleTrack() {
+        val player = exoPlayer ?: return
+        val (options, _) = TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
+        val firstSubtitleIndex = options.indexOfFirst { !it.isOff }
+        if (firstSubtitleIndex >= 0) {
+            selectSubtitleTrack("subtitle:$firstSubtitleIndex")
+        }
+    }
+
+    private fun TrackOption.toOpenXrTrackRow(
+        prefix: String,
+        index: Int,
+        selectedIndex: Int
+    ): OpenXrTrackRow {
+        val format = format
+        val subtitle = if (format == null || isOff) {
+            ""
+        } else {
+            listOfNotNull(
+                format.language?.takeIf { it.isNotBlank() },
+                format.sampleMimeType?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ).joinToString(" · ")
+        }
+        val supported = isOff || group?.isTrackSupported(trackIndex) == true
+        return OpenXrTrackRow(
+            id = "$prefix:$index",
+            title = TrackLogic.buildTrackLabel(this, appContext),
+            subtitle = subtitle,
+            selected = index == selectedIndex,
+            enabled = supported
+        )
+    }
+
+    private fun selectTrackById(id: String, prefix: String, trackType: Int) {
+        val player = exoPlayer ?: return
+        val expectedPrefix = "$prefix:"
+        if (!id.startsWith(expectedPrefix)) return
+        val index = id.removePrefix(expectedPrefix).toIntOrNull() ?: return
+        val (options, _) = when (trackType) {
+            C.TRACK_TYPE_AUDIO -> TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
+            C.TRACK_TYPE_TEXT -> TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
+            else -> return
+        }
+        val option = options.getOrNull(index) ?: return
+        val builder = player.trackSelectionParameters.buildUpon()
+        if (option.isOff) {
+            builder.setTrackTypeDisabled(trackType, true)
+        } else {
+            builder.setTrackTypeDisabled(trackType, false)
+            option.group?.let { group ->
+                builder.setOverrideForType(
+                    TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex)
+                )
+            }
+        }
+        player.trackSelectionParameters = builder.build()
+    }
 
     fun togglePlayPause() {
         exoPlayer?.let { if (it.isPlaying) it.pause() else it.play() }

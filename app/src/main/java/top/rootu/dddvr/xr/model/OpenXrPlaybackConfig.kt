@@ -1,6 +1,7 @@
 package top.rootu.dddvr.xr.model
 
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
+import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 
@@ -21,9 +22,11 @@ data class OpenXrPlaybackConfig(
                 request.vrConfig.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
                 else -> request.stereoInputMode
             }
-            val mode = when (request.vrConfig.projectionMode.name) {
-                "VR_CURVED_SCREEN" -> OpenXrScreenMode.CURVED
-                else -> OpenXrScreenMode.FLAT
+            val mode = when (request.vrConfig.projectionMode) {
+                ProjectionMode.VR_CURVED_SCREEN -> OpenXrScreenMode.CURVED
+                ProjectionMode.VR_FLAT_SCREEN -> OpenXrScreenMode.FLAT
+                ProjectionMode.VR180 -> OpenXrScreenMode.VR180
+                ProjectionMode.VR360 -> OpenXrScreenMode.VR360
             }
             return OpenXrPlaybackConfig(
                 stereoMode = effectiveStereo,

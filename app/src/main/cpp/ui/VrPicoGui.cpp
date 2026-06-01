@@ -250,6 +250,18 @@ bool VrPicoGui::createFontsTexture() {
     int height = 0;
     int bytesPerPixel = 0;
     ImGuiIO& io = ImGui::GetIO();
+    ImFontConfig fontConfig{};
+    fontConfig.RasterizerMultiply = 1.12f;
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        "/system/fonts/Roboto-Regular.ttf",
+        17.0f,
+        &fontConfig,
+        io.Fonts->GetGlyphRangesCyrillic()
+    );
+    if (font == nullptr) {
+        font = io.Fonts->AddFontDefault();
+    }
+    io.FontDefault = font;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height, &bytesPerPixel);
     if (pixels == nullptr || width <= 0 || height <= 0) return false;
 

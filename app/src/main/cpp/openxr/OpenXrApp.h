@@ -34,6 +34,7 @@ public:
         const std::vector<std::string>& audioTrackLabels,
         int selectedAudioTrackIndex
     );
+    void setPlayerUiState(const VrPlayerUiState& state);
 
     bool initialize();
     bool start();
@@ -53,6 +54,7 @@ private:
     void dispatchInputActionOnRenderThread(OpenXrInputActionCode code);
     void dispatchTimelineSeekOnRenderThread(int32_t progressPermille);
     void dispatchAudioTrackSelectedOnRenderThread(int32_t trackIndex);
+    void dispatchPlayerUiActionOnRenderThread(const VrPlayerPanelAction& action);
     bool createVideoSurfaceOnRenderThread();
     bool updateVideoSurfaceOnRenderThread();
     void applyPendingVideoSizeOnRenderThread(JNIEnv* env);
@@ -93,6 +95,7 @@ private:
     jmethodID bridgeOnInputAction_ = nullptr;
     jmethodID bridgeOnTimelineSeek_ = nullptr;
     jmethodID bridgeOnAudioTrackSelected_ = nullptr;
+    jmethodID bridgeOnPlayerUiAction_ = nullptr;
     jmethodID videoSurfaceCtor_ = nullptr;
     jmethodID videoSurfaceGetSurface_ = nullptr;
     jmethodID videoSurfaceUpdateTexImage_ = nullptr;

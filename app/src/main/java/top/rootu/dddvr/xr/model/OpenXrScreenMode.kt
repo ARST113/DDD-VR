@@ -2,5 +2,7 @@ package top.rootu.dddvr.xr.model
 
 enum class OpenXrScreenMode {
     FLAT,
-    CURVED
+    CURVED,
+    VR180,
+    VR360
 }

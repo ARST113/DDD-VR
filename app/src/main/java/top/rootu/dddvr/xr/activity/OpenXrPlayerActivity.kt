@@ -29,6 +29,12 @@ import top.rootu.dddvr.xr.bridge.OpenXrBridge
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
 import top.rootu.dddvr.xr.model.OpenXrScreenMode
 import top.rootu.dddvr.xr.ui.OpenXrDebugOverlay
+import top.rootu.dddvr.xr.ui.OpenXrAudioUiState
+import top.rootu.dddvr.xr.ui.OpenXrDisplayUiState
+import top.rootu.dddvr.xr.ui.OpenXrPlayerUiAction
+import top.rootu.dddvr.xr.ui.OpenXrPlayerUiState
+import top.rootu.dddvr.xr.ui.OpenXrPlaylistRow
+import top.rootu.dddvr.xr.ui.OpenXrSubtitlesUiState
 
 class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private lateinit var playerManager: PlayerManager
@@ -62,6 +68,14 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var pausedBeforeXrStart = false
     private var resumePlaybackAfterFocusLoss = false
     private var openXrUiVisible = true
+    private var activeModal = OpenXrModal.NONE
+    private var activeSettingsTab = OpenXrSettingsTab.DISPLAY
+    private var muted = false
+    private var aspectRatio = "Оригинал"
+    private var playbackSpeed = 1.0f
+    private var enhanceVideo = false
+    private var spatialAudio = false
+    private var subtitlesEnabled = false
     private var xrStartAttempt = 0
     private var notResumedRetryCount = 0
     private var sourceErrorRetryCount = 0
@@ -561,34 +575,80 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private fun updateOpenXrUiState(reason: String) {
         if (!::bridge.isInitialized) return
         val playing = !smokeOnly && playerInitialized && playbackSession.isPlaying
-        val buffering = !smokeOnly &&
-            playerInitialized &&
-            playerManager.exoPlayer?.playbackState == Player.STATE_BUFFERING
+        val buffering = !smokeOnly && playerInitialized && playbackSession.isBuffering
         val positionMs = if (!smokeOnly && playerInitialized) playbackSession.currentPositionMs else 0L
         val durationMs = if (!smokeOnly && playerInitialized) playbackSession.durationMs.coerceAtLeast(0L) else 0L
         val bufferedPositionMs = if (!smokeOnly && playerInitialized) playbackSession.bufferedPositionMs.coerceAtLeast(0L) else 0L
         val title = playbackRequest?.title?.takeIf { it.isNotBlank() } ?: "DDD-VR OpenXR Player"
         val audioLabels = audioOptions.map { TrackLogic.buildTrackLabel(it, this) }.toTypedArray()
         val selectedAudioLabel = audioLabels.getOrNull(selectedAudioTrackIndex).orEmpty()
-        bridge.setUiState(
+        if (!smokeOnly && playerInitialized && ::playbackSession.isInitialized) {
+            playbackSpeed = playbackSession.playbackSpeed
+        }
+        val audioTrackRows = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+            playerManager.getAudioTrackRows()
+        } else {
+            emptyList()
+        }
+        val subtitleTrackRows = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+            playerManager.getSubtitleTrackRows()
+        } else {
+            emptyList()
+        }
+        subtitlesEnabled = subtitleTrackRows.any { it.selected && !it.id.endsWith(":0") }
+        val state = OpenXrPlayerUiState(
             visible = openXrUiVisible,
+            pinned = activeModal != OpenXrModal.NONE,
             playing = playing,
             buffering = buffering,
+            muted = muted,
             positionMs = positionMs,
             durationMs = durationMs,
             bufferedPositionMs = bufferedPositionMs,
             title = title,
-            stereoModeLabel = stereoModeLabel(),
-            audioTrackLabel = selectedAudioLabel,
-            audioTrackLabels = audioLabels,
-            selectedAudioTrackIndex = selectedAudioTrackIndex
+            projectionModeLabel = projectionModeLabel(),
+            audioTrackLabel = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+                playerManager.currentAudioTrackLabel()
+            } else {
+                selectedAudioLabel
+            },
+            subtitleTrackLabel = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+                playerManager.currentSubtitleTrackLabel()
+            } else {
+                ""
+            },
+            activeModal = activeModal.nativeCode,
+            activeSettingsTab = activeSettingsTab.nativeCode,
+            hoverTarget = 0,
+            display = OpenXrDisplayUiState(
+                aspectRatio = aspectRatio,
+                playbackSpeed = playbackSpeed,
+                enhanceVideo = enhanceVideo,
+                brightness = 1.0f
+            ),
+            subtitles = OpenXrSubtitlesUiState(
+                enabled = subtitlesEnabled,
+                delayMs = 0,
+                sizeLabel = "Средний",
+                positionLabel = "Ниже"
+            ),
+            audio = OpenXrAudioUiState(
+                delayMs = 0,
+                spatialAudio = spatialAudio
+            ),
+            playlistRows = buildPlaylistRows(),
+            audioTracks = audioTrackRows,
+            subtitleTracks = subtitleTrackRows
         )
+        bridge.setPlayerUiState(state)
         if (reason != "tick") {
             Log.i(
                 TAG,
                 "XR_UI_STATE reason=$reason visible=$openXrUiVisible positionMs=$positionMs " +
                     "durationMs=$durationMs bufferedMs=$bufferedPositionMs playing=$playing " +
-                    "buffering=$buffering audioTracks=${audioLabels.size} selectedAudio=$selectedAudioTrackIndex"
+                    "buffering=$buffering modal=$activeModal tab=$activeSettingsTab " +
+                    "audioTracks=${audioTrackRows.size.coerceAtLeast(audioLabels.size)} " +
+                    "subtitleTracks=${subtitleTrackRows.size} selectedAudio=$selectedAudioTrackIndex"
             )
         }
     }
@@ -602,17 +662,55 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         )
         audioOptions = tracks
         selectedAudioTrackIndex = selectedIndex.coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
-        Log.i(TAG, "XR_AUDIO_TRACKS_UPDATE reason=$reason count=${audioOptions.size} selected=$selectedAudioTrackIndex")
+        subtitlesEnabled = playerManager.getSubtitleTrackRows().any { it.selected && !it.id.endsWith(":0") }
+        Log.i(TAG, "XR_AUDIO_TRACKS_UPDATE reason=$reason count=${audioOptions.size} selected=$selectedAudioTrackIndex subtitlesEnabled=$subtitlesEnabled")
         updateOpenXrUiState("audio_tracks_$reason")
     }
 
-    private fun stereoModeLabel(): String {
-        return when (playbackConfig.stereoMode) {
+    private fun buildPlaylistRows(): List<OpenXrPlaylistRow> {
+        val player = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+            playerManager.exoPlayer
+        } else {
+            null
+        }
+        if (player != null && player.mediaItemCount > 0) {
+            return (0 until player.mediaItemCount).map { index ->
+                val item = player.getMediaItemAt(index)
+                val itemTitle = item.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+                    ?: playbackRequest?.title?.takeIf { it.isNotBlank() }
+                    ?: "Видео ${index + 1}"
+                OpenXrPlaylistRow(
+                    id = "playlist:$index",
+                    title = itemTitle,
+                    subtitle = "${index + 1} / ${player.mediaItemCount}",
+                    selected = index == player.currentMediaItemIndex
+                )
+            }
+        }
+        val fallbackTitle = playbackRequest?.title?.takeIf { it.isNotBlank() } ?: "Видео"
+        return listOf(
+            OpenXrPlaylistRow(
+                id = "playlist:0",
+                title = fallbackTitle,
+                subtitle = "",
+                selected = true
+            )
+        )
+    }
+
+    private fun projectionModeLabel(): String {
+        val stereoLabel = when (playbackConfig.stereoMode) {
             StereoInputMode.SBS -> "SBS"
             StereoInputMode.SBS_REVERSED -> "SBS-R"
             StereoInputMode.OU -> "OU"
             StereoInputMode.OU_REVERSED -> "OU-R"
             else -> "2D"
+        }
+        return when (playbackConfig.screenMode) {
+            OpenXrScreenMode.VR180 -> "180"
+            OpenXrScreenMode.VR360 -> "360"
+            OpenXrScreenMode.CURVED -> if (stereoLabel == "2D") "Curved" else stereoLabel
+            OpenXrScreenMode.FLAT -> stereoLabel
         }
     }
 
@@ -677,6 +775,24 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         FAILED
     }
 
+    private enum class OpenXrModal(val nativeCode: Int) {
+        NONE(0),
+        PLAYLIST(1),
+        SETTINGS(2)
+    }
+
+    private enum class OpenXrSettingsTab(val nativeCode: Int) {
+        DISPLAY(0),
+        SUBTITLES(1),
+        AUDIO(2);
+
+        companion object {
+            fun fromNative(value: Int): OpenXrSettingsTab {
+                return values().firstOrNull { it.nativeCode == value } ?: DISPLAY
+            }
+        }
+    }
+
     override fun onPlayPause() {
         if (!smokeOnly && playerInitialized) {
             if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play()
@@ -686,7 +802,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     }
     override fun onSeekBy(deltaMs: Long) {
         if (!smokeOnly && playerInitialized) {
-            playbackSession.seekTo(playbackSession.currentPositionMs + deltaMs)
+            playbackSession.seekBy(deltaMs)
             openXrUiVisible = true
             updateOpenXrUiState("input_seek")
         }
@@ -703,6 +819,106 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         }
     }
     override fun onSelectAudioTrack(trackIndex: Int) { applyAudioTrackSelection(trackIndex) }
+    override fun onPlayerUiAction(action: OpenXrPlayerUiAction) {
+        when (action) {
+            OpenXrPlayerUiAction.TogglePlaylist -> {
+                activeModal = if (activeModal == OpenXrModal.PLAYLIST) OpenXrModal.NONE else OpenXrModal.PLAYLIST
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleSettings -> {
+                activeModal = if (activeModal == OpenXrModal.SETTINGS) OpenXrModal.NONE else OpenXrModal.SETTINGS
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleVolume -> {
+                muted = !muted
+                if (!smokeOnly && playerInitialized) playbackSession.setMuted(muted)
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleProjectionMenu -> {
+                activeModal = OpenXrModal.SETTINGS
+                activeSettingsTab = OpenXrSettingsTab.DISPLAY
+                openXrUiVisible = true
+                Log.i(TAG, "XR_PROJECTION_MENU_REQUEST current=${projectionModeLabel()}")
+            }
+            OpenXrPlayerUiAction.ToggleEnvironment -> {
+                openXrUiVisible = true
+                Log.i(TAG, "XR_ENVIRONMENT_TOGGLE_REQUEST")
+            }
+            is OpenXrPlayerUiAction.SetSettingsTab -> {
+                activeModal = OpenXrModal.SETTINGS
+                activeSettingsTab = OpenXrSettingsTab.fromNative(action.tab)
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.SelectAudioTrack -> {
+                if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+                    if (action.id.startsWith("legacy_audio:")) {
+                        action.id.removePrefix("legacy_audio:").toIntOrNull()?.let(::applyAudioTrackSelection)
+                    } else {
+                        playerManager.selectAudioTrack(action.id)
+                        updateAudioTrackOptions("ui_audio_select")
+                    }
+                }
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.SelectSubtitleTrack -> {
+                if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
+                    playerManager.selectSubtitleTrack(action.id)
+                    subtitlesEnabled = !action.id.endsWith(":0")
+                }
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.SelectPlaylistItem -> {
+                selectPlaylistItem(action.id)
+                activeModal = OpenXrModal.NONE
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.SetAspectRatio -> {
+                aspectRatio = action.value.takeIf { it.isNotBlank() } ?: "Оригинал"
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.SetPlaybackSpeed -> {
+                playbackSpeed = action.value.coerceIn(0.25f, 3.0f)
+                if (!smokeOnly && playerInitialized) playbackSession.setPlaybackSpeed(playbackSpeed)
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleEnhanceVideo -> {
+                enhanceVideo = !enhanceVideo
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleSpatialAudio -> {
+                spatialAudio = !spatialAudio
+                openXrUiVisible = true
+            }
+            OpenXrPlayerUiAction.ToggleSubtitles -> {
+                setSubtitlesEnabled(!subtitlesEnabled)
+                openXrUiVisible = true
+            }
+            is OpenXrPlayerUiAction.Unknown -> {
+                Log.w(TAG, "XR_PLAYER_UI_ACTION_UNKNOWN type=${action.actionType}")
+            }
+        }
+        updateOpenXrUiState("player_ui_action_${action.javaClass.simpleName}")
+    }
+
+    private fun setSubtitlesEnabled(enabled: Boolean) {
+        subtitlesEnabled = enabled
+        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
+        if (enabled) {
+            playerManager.enableFirstSubtitleTrack()
+        } else {
+            playerManager.disableSubtitles()
+        }
+    }
+
+    private fun selectPlaylistItem(id: String) {
+        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
+        val player = playerManager.exoPlayer ?: return
+        val index = id.removePrefix("playlist:").toIntOrNull() ?: return
+        if (index !in 0 until player.mediaItemCount) return
+        player.seekToDefaultPosition(index)
+        player.playWhenReady = true
+        Log.i(TAG, "XR_PLAYLIST_ITEM_SELECTED index=$index")
+    }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
     override fun onShowMenu() {
         openXrUiVisible = !openXrUiVisible
