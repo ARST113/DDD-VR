@@ -160,12 +160,12 @@ void VrPicoGui::renderPanelQuad(const float* mvp, const VrUiPlane& plane) {
 
     std::vector<GLfloat> vertices;
     vertices.reserve(30);
-    append(vertices, -halfW, -halfH, 0.f, 1.f);
-    append(vertices,  halfW, -halfH, 1.f, 1.f);
-    append(vertices, -halfW,  halfH, 0.f, 0.f);
-    append(vertices,  halfW, -halfH, 1.f, 1.f);
-    append(vertices,  halfW,  halfH, 1.f, 0.f);
-    append(vertices, -halfW,  halfH, 0.f, 0.f);
+    append(vertices, -halfW, -halfH, 0.f, 0.f);
+    append(vertices,  halfW, -halfH, 1.f, 0.f);
+    append(vertices, -halfW,  halfH, 0.f, 1.f);
+    append(vertices,  halfW, -halfH, 1.f, 0.f);
+    append(vertices,  halfW,  halfH, 1.f, 1.f);
+    append(vertices, -halfW,  halfH, 0.f, 1.f);
 
     GLint lastProgram = 0;
     GLint lastTexture = 0;

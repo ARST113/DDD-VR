@@ -615,7 +615,7 @@ void VrPlayerPanel::draw() {
     draw->AddText(ImVec2(titleRect.GetCenter().x - titleSize.x * 0.5f, titleRect.Min.y + 6.f), IM_COL32(242, 246, 255, 192), title.c_str());
     draw->PopClipRect();
 
-    const float buttonCenterY = bar.Min.y + 110.f;
+    const float buttonCenterY = bar.Min.y + 114.f;
     const ImRect playlistButton = centeredRect(bar.Min.x + 70.f, buttonCenterY, 66.f, 54.f);
     const ImRect volumeButton = centeredRect(bar.Min.x + 138.f, buttonCenterY, 66.f, 54.f);
     const ImRect prevButton = centeredRect(centerX - 122.f, buttonCenterY, 70.f, 56.f);
