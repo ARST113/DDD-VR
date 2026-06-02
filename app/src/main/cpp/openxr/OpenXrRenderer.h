@@ -63,7 +63,12 @@ public:
     bool consumeUiAudioTrackSelection(int* outTrackIndex);
     bool consumePlayerPanelAction(VrPlayerPanelAction* outAction);
     void setPlayerHoverTarget(CinemaUiHoverTarget target);
-    bool updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters);
+    bool updateScreenGrab(
+        bool active,
+        const XrPosef& gripPose,
+        float rayDistanceDeltaMeters,
+        bool directTranslationMode = false
+    );
     bool seekProgressFromPointer(const XrPosef& aimPose, int* outProgressPermille);
     CinemaUiHoverTarget playerHoverTarget(const XrPosef& aimPose) const;
     void adjustScreenYaw(float deltaRadians);
@@ -115,7 +120,20 @@ private:
     float screenCenterY_ = 0.f;
     float screenCenterZ_ = -3.5f;
     float screenCurveRadians_ = 0.45f;
+    float uiPanelOffsetX_ = 0.f;
+    float uiPanelOffsetY_ = 0.f;
+    float uiPanelDragStartPixelX_ = 0.f;
+    float uiPanelDragStartPixelY_ = 0.f;
+    float uiPanelDragStartOffsetX_ = 0.f;
+    float uiPanelDragStartOffsetY_ = 0.f;
+    float uiPanelDragStartWorldX_ = 0.f;
+    float uiPanelDragStartWorldY_ = 0.f;
+    float uiPanelDragStartWorldZ_ = 0.f;
     bool screenGrabActive_ = false;
+    bool uiPanelDragCandidateActive_ = false;
+    bool uiPanelDragActive_ = false;
+    int uiPanelDragCandidateHand_ = -1;
+    int uiPanelDragHand_ = -1;
     XrPosef grabStartPose_{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
     float grabStartRayDistanceMeters_ = 3.5f;
     float grabStartOffsetX_ = 0.f;
@@ -124,6 +142,8 @@ private:
     float grabStartCenterX_ = 0.f;
     float grabStartCenterY_ = 0.f;
     float grabStartCenterZ_ = -3.5f;
+    float grabStartYawRadians_ = 0.f;
+    bool screenGrabDirectMode_ = false;
     int screenHighlightFrameBudget_ = 0;
     float videoTransform_[16] = {
         1.f, 0.f, 0.f, 0.f,

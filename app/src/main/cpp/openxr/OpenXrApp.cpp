@@ -416,16 +416,21 @@ void OpenXrApp::loop() {
             }
 #endif
             const int grabHand = input_.activeGrabHand();
-            const OpenXrPointerRay* grabPose =
-                grabHand >= 0 && pointerRays[grabHand].active ? &pointerRays[grabHand] :
-                grabHand >= 0 && gripPoses[grabHand].active ? &gripPoses[grabHand] :
-                nullptr;
+            const OpenXrPointerRay* grabPose = nullptr;
+            if (grabHand >= 0 && pointerRays[grabHand].active) {
+                grabPose = &pointerRays[grabHand];
+            } else if (grabHand >= 0 && gripPoses[grabHand].active) {
+                grabPose = &gripPoses[grabHand];
+            }
             XrPosef emptyPose{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
-            const float grabDistanceDeltaMeters = grabControlActive ? controls.screenDistanceDeltaMeters : 0.f;
+            const float grabDistanceDeltaMeters = grabHand >= 0
+                ? controls.screenDistanceDeltaMeters
+                : 0.f;
             const bool grabMoved = renderer_.updateScreenGrab(
                 grabPose != nullptr,
                 grabPose != nullptr ? grabPose->pose : emptyPose,
-                grabDistanceDeltaMeters
+                grabDistanceDeltaMeters,
+                false
             );
             if (grabMoved) {
                 input_.markGrabMotionConsumed();

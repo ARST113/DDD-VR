@@ -136,7 +136,9 @@ class PlaybackSession(
 
     fun play() {
         runOnPlayerThread {
-            playerManager.exoPlayer?.playWhenReady = true
+            val player = playerManager.exoPlayer ?: return@runOnPlayerThread
+            player.playWhenReady = true
+            player.play()
             lastKnownWantsToPlay = true
             lastKnownIsPlaying = true
         }
@@ -144,10 +146,12 @@ class PlaybackSession(
 
     fun pause() {
         runOnPlayerThread {
-            playerManager.exoPlayer?.playWhenReady = false
+            val player = playerManager.exoPlayer
+            player?.playWhenReady = false
+            player?.pause()
             lastKnownWantsToPlay = false
             lastKnownIsPlaying = false
-            lastKnownPositionMs = playerManager.exoPlayer?.currentPosition ?: lastKnownPositionMs
+            lastKnownPositionMs = player?.currentPosition ?: lastKnownPositionMs
         }
     }
 

@@ -435,6 +435,7 @@ class PlayerManager(
         })
 
         this.exoPlayer = player
+        onPlayerCreated?.invoke(player)
 
         // 6. Restore State
         if (currentMediaItems.isNotEmpty()) {
@@ -442,9 +443,10 @@ class PlayerManager(
             player.setMediaSources(sources, currentWindowIndex, currentPosition)
             player.playWhenReady = playWhenReady
             player.prepare()
+            if (playWhenReady) {
+                player.play()
+            }
         }
-
-        onPlayerCreated?.invoke(player)
     }
 
     private fun buildMediaSources(exoItems: List<Media3MediaItem>): List<MediaSource> {
@@ -578,6 +580,7 @@ class PlayerManager(
             exoPlayer?.setMediaSources(sources, startIndex, currentPosition)
             exoPlayer?.playWhenReady = true
             exoPlayer?.prepare()
+            exoPlayer?.play()
         }
     }
 

@@ -12,8 +12,11 @@ constexpr float kMinScreenDistanceMeters = 1.5f;
 constexpr float kMaxScreenDistanceMeters = 8.0f;
 constexpr float kMinScreenHeightMeters = -1.5f;
 constexpr float kMaxScreenHeightMeters = 1.8f;
-constexpr float kGrabFollowSmoothing = 0.48f;
+constexpr float kGrabFollowSmoothing = 0.86f;
+constexpr float kDirectGrabFollowSmoothing = 0.72f;
+constexpr float kDirectGrabTranslationScale = 1.8f;
 constexpr float kGrabConsumedMoveThresholdMeters = 0.14f;
+constexpr float kDirectGrabConsumedMoveThresholdMeters = 0.045f;
 constexpr float kGrabConsumedYawThresholdRadians = 0.07f;
 constexpr int kUiAutoHideFrames = 180;
 constexpr float kUiPlaneOffsetMeters = 0.12f;
@@ -36,6 +39,10 @@ constexpr float kImGuiPanelModalDownScale = 0.46f;
 constexpr float kImGuiPanelForwardOffsetMeters = 0.10f;
 constexpr float kImGuiPanelModalForwardOffsetMeters = 0.16f;
 constexpr float kImGuiPanelFollowResponse = 14.0f;
+constexpr float kUiPanelMaxOffsetXMeters = 0.65f;
+constexpr float kUiPanelMaxOffsetYMeters = 0.42f;
+constexpr float kUiPanelDragStartThresholdMeters = 0.018f;
+constexpr bool kDetachedUiPanelDragEnabled = false;
 
 std::array<float, 16> multiply(const std::array<float, 16>& a, const std::array<float, 16>& b) {
     std::array<float, 16> out{};
@@ -143,6 +150,71 @@ bool insideRect(float x, float y, float minX, float minY, float maxX, float maxY
         y <= maxY + padding;
 }
 
+VrRayHit hitUiPlaneUnbounded(
+    const XrPosef& aimPose,
+    const VrUiPlane& plane,
+    int hand,
+    int textureWidth,
+    int textureHeight
+) {
+    VrRayHit out{};
+    out.hand = hand;
+    const auto direction = rotateByQuat(aimPose.orientation, 0.f, 0.f, -1.f);
+    const float directionLength = std::sqrt(
+        direction[0] * direction[0] +
+        direction[1] * direction[1] +
+        direction[2] * direction[2]
+    );
+    if (directionLength <= 0.001f) return out;
+    const float dirX = direction[0] / directionLength;
+    const float dirY = direction[1] / directionLength;
+    const float dirZ = direction[2] / directionLength;
+    const float denom =
+        dirX * plane.normal.x +
+        dirY * plane.normal.y +
+        dirZ * plane.normal.z;
+    if (std::fabs(denom) <= 0.001f) return out;
+    const float toPlaneX = plane.center.x - aimPose.position.x;
+    const float toPlaneY = plane.center.y - aimPose.position.y;
+    const float toPlaneZ = plane.center.z - aimPose.position.z;
+    const float t =
+        (toPlaneX * plane.normal.x +
+         toPlaneY * plane.normal.y +
+         toPlaneZ * plane.normal.z) / denom;
+    if (t <= 0.f) return out;
+
+    const float hitX = aimPose.position.x + dirX * t;
+    const float hitY = aimPose.position.y + dirY * t;
+    const float hitZ = aimPose.position.z + dirZ * t;
+    const float deltaX = hitX - plane.center.x;
+    const float deltaY = hitY - plane.center.y;
+    const float deltaZ = hitZ - plane.center.z;
+    const float localX =
+        deltaX * plane.right.x +
+        deltaY * plane.right.y +
+        deltaZ * plane.right.z;
+    const float localY =
+        deltaX * plane.up.x +
+        deltaY * plane.up.y +
+        deltaZ * plane.up.z;
+
+    out.hit = true;
+    out.worldX = hitX;
+    out.worldY = hitY;
+    out.worldZ = hitZ;
+    out.pixelX = clampFloat(
+        (localX / plane.widthMeters + 0.5f) * static_cast<float>(textureWidth),
+        0.f,
+        static_cast<float>(textureWidth)
+    );
+    out.pixelY = clampFloat(
+        (0.5f - localY / plane.heightMeters) * static_cast<float>(textureHeight),
+        0.f,
+        static_cast<float>(textureHeight)
+    );
+    return out;
+}
+
 bool isPlayerUiPixelInteractive(float x, float y, bool modalOpen) {
     if (x < 0.f || y < 0.f ||
         x > static_cast<float>(kImGuiUiTextureWidth) ||
@@ -174,6 +246,65 @@ bool isPlayerUiPixelInteractive(float x, float y, bool modalOpen) {
     if (insideRect(x, y, handleMinX, handleTop, handleMaxX, handleTop + handleHeight, 10.f)) {
         return true;
     }
+
+    if (modalOpen) {
+        const float modalGap = 18.f;
+        const float modalTopMargin = 18.f;
+        const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
+        const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
+        const float modalMinX = centerX - VrPlayerTheme::ModalWidth * 0.5f;
+        const float modalMaxX = centerX + VrPlayerTheme::ModalWidth * 0.5f;
+        const float modalMinY = barTop - modalGap - modalHeight;
+        const float modalMaxY = barTop - modalGap;
+        if (insideRect(x, y, modalMinX, modalMinY, modalMaxX, modalMaxY, 10.f)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool isPlayerUiDragHandlePixel(float x, float y, bool modalOpen) {
+    if (!kDetachedUiPanelDragEnabled) return false;
+
+    const float canvasX = static_cast<float>(kImGuiUiTextureWidth);
+    const float canvasY = static_cast<float>(kImGuiUiTextureHeight);
+    const float centerX = canvasX * 0.5f;
+    const float barWidth = std::min(VrPlayerTheme::MainBarWidth, canvasX - 120.f);
+    const float barTop = modalOpen
+        ? canvasY - VrPlayerTheme::MainBarHeight - 34.f
+        : canvasY - 190.f;
+    const float barMaxY = barTop + VrPlayerTheme::MainBarHeight;
+    const float handleHeight = modalOpen ? 20.f : VrPlayerTheme::DragHandleHeight;
+    const float handleTop = std::min(
+        barMaxY + (modalOpen ? 6.f : 14.f),
+        canvasY - handleHeight - 8.f
+    );
+    const float handleMinX = centerX - VrPlayerTheme::DragHandleWidth * 0.5f;
+    const float handleMaxX = centerX + VrPlayerTheme::DragHandleWidth * 0.5f;
+    const bool overHandle = insideRect(
+        x,
+        y,
+        handleMinX - 96.f,
+        handleTop - 6.f,
+        handleMaxX + 96.f,
+        handleTop + handleHeight + 44.f,
+        0.f
+    );
+    if (overHandle) return true;
+
+    const float barMinX = centerX - barWidth * 0.5f;
+    const float barMaxX = centerX + barWidth * 0.5f;
+    const bool overPanel = insideRect(
+        x,
+        y,
+        barMinX,
+        barTop,
+        barMaxX,
+        barMaxY,
+        10.f
+    );
+    if (overPanel) return true;
 
     if (modalOpen) {
         const float modalGap = 18.f;
@@ -299,6 +430,10 @@ void OpenXrRenderer::setPointerRays(const OpenXrPointerRay rays[2]) {
         screenRayHits_[1] = {};
         activeUiHit_ = {};
         activeUiPointerHand_ = -1;
+        uiPanelDragCandidateActive_ = false;
+        uiPanelDragCandidateHand_ = -1;
+        uiPanelDragActive_ = false;
+        uiPanelDragHand_ = -1;
         return;
     }
     pointerRays_[0] = rays[0];
@@ -320,24 +455,39 @@ void OpenXrRenderer::updateUiInteraction(
     if (!uiBackend_.initialized() || rays == nullptr || !active) {
         uiBackend_.setPointerVisible(false);
         uiBackend_.setPrimaryButton(false);
+        uiPanelDragCandidateActive_ = false;
+        uiPanelDragCandidateHand_ = -1;
+        uiPanelDragActive_ = false;
+        uiPanelDragHand_ = -1;
         return;
     }
 
     const VrUiPlane plane = currentUiPlane();
+    VrRayHit rawUiHits[2]{};
+    VrRayHit dragPlaneHits[2]{};
+    const bool modalOpen = uiModalOpen_.load();
     for (int hand = 0; hand < 2; ++hand) {
         if (!rays[hand].active) continue;
-        uiRayHits_[hand] = rayInteractor_.hitTest(
+        rawUiHits[hand] = rayInteractor_.hitTest(
             rays[hand].pose,
             plane,
             uiBackend_.width(),
             uiBackend_.height(),
             hand
         );
+        dragPlaneHits[hand] = hitUiPlaneUnbounded(
+            rays[hand].pose,
+            plane,
+            hand,
+            uiBackend_.width(),
+            uiBackend_.height()
+        );
+        uiRayHits_[hand] = rawUiHits[hand];
         if (uiRayHits_[hand].hit &&
             !isPlayerUiPixelInteractive(
                 uiRayHits_[hand].pixelX,
                 uiRayHits_[hand].pixelY,
-                uiModalOpen_.load()
+                modalOpen
             )) {
             uiRayHits_[hand] = {};
         }
@@ -345,6 +495,133 @@ void OpenXrRenderer::updateUiInteraction(
     }
 
     int selectedHand = -1;
+    if (uiPanelDragActive_) {
+        const int hand = uiPanelDragHand_;
+        const bool keepDragging = hand >= 0 &&
+            hand < 2 &&
+            rays[hand].active &&
+            dragPlaneHits[hand].hit &&
+            triggerPressed != nullptr &&
+            triggerPressed[hand];
+        if (keepDragging) {
+            const float dxWorld = dragPlaneHits[hand].worldX - uiPanelDragStartWorldX_;
+            const float dyWorld = dragPlaneHits[hand].worldY - uiPanelDragStartWorldY_;
+            const float dzWorld = dragPlaneHits[hand].worldZ - uiPanelDragStartWorldZ_;
+            const float localX =
+                dxWorld * plane.right.x +
+                dyWorld * plane.right.y +
+                dzWorld * plane.right.z;
+            const float localY =
+                dxWorld * plane.up.x +
+                dyWorld * plane.up.y +
+                dzWorld * plane.up.z;
+            uiPanelOffsetX_ = clampFloat(
+                uiPanelDragStartOffsetX_ + localX,
+                -kUiPanelMaxOffsetXMeters,
+                kUiPanelMaxOffsetXMeters
+            );
+            uiPanelOffsetY_ = clampFloat(
+                uiPanelDragStartOffsetY_ + localY,
+                -kUiPanelMaxOffsetYMeters,
+                kUiPanelMaxOffsetYMeters
+            );
+            selectedHand = hand;
+            uiRayHits_[hand] = rawUiHits[hand].hit ? rawUiHits[hand] : dragPlaneHits[hand];
+            uiAutoHideFrameBudget_ = kUiAutoHideFrames;
+            static uint32_t dragMoveLogCount = 0;
+            dragMoveLogCount += 1;
+            if (dragMoveLogCount <= 6 || dragMoveLogCount % 30 == 0) {
+                XR_LOGI(
+                    "DDDVR/OpenXRUi",
+                    "XR_UI_PANEL_DRAG_MOVE x=%.3f y=%.3f localX=%.3f localY=%.3f",
+                    uiPanelOffsetX_,
+                    uiPanelOffsetY_,
+                    localX,
+                    localY
+                );
+            }
+        } else {
+            XR_LOGI(
+                "DDDVR/OpenXRUi",
+                "XR_UI_PANEL_DRAG_END x=%.3f y=%.3f",
+                uiPanelOffsetX_,
+                uiPanelOffsetY_
+            );
+            uiPanelDragActive_ = false;
+            uiPanelDragHand_ = -1;
+            uiPanelDragCandidateActive_ = false;
+            uiPanelDragCandidateHand_ = -1;
+        }
+    }
+    if (!uiPanelDragActive_ && uiPanelDragCandidateActive_) {
+        const int hand = uiPanelDragCandidateHand_;
+        const bool keepCandidate = hand >= 0 &&
+            hand < 2 &&
+            rays[hand].active &&
+            dragPlaneHits[hand].hit &&
+            triggerPressed != nullptr &&
+            triggerPressed[hand];
+        if (keepCandidate) {
+            const float dxWorld = dragPlaneHits[hand].worldX - uiPanelDragStartWorldX_;
+            const float dyWorld = dragPlaneHits[hand].worldY - uiPanelDragStartWorldY_;
+            const float dzWorld = dragPlaneHits[hand].worldZ - uiPanelDragStartWorldZ_;
+            const float localX =
+                dxWorld * plane.right.x +
+                dyWorld * plane.right.y +
+                dzWorld * plane.right.z;
+            const float localY =
+                dxWorld * plane.up.x +
+                dyWorld * plane.up.y +
+                dzWorld * plane.up.z;
+            const float moved = std::sqrt(localX * localX + localY * localY);
+            if (moved >= kUiPanelDragStartThresholdMeters) {
+                uiPanelDragActive_ = true;
+                uiPanelDragHand_ = hand;
+                XR_LOGI(
+                    "DDDVR/OpenXRUi",
+                    "XR_UI_PANEL_DRAG_BEGIN hand=%d x=%.1f y=%.1f offsetX=%.3f offsetY=%.3f moved=%.3f",
+                    hand,
+                    uiPanelDragStartPixelX_,
+                    uiPanelDragStartPixelY_,
+                    uiPanelOffsetX_,
+                    uiPanelOffsetY_,
+                    moved
+                );
+            }
+        } else {
+            uiPanelDragCandidateActive_ = false;
+            uiPanelDragCandidateHand_ = -1;
+        }
+    }
+    if (!uiPanelDragActive_ && !uiPanelDragCandidateActive_ && triggerPressed != nullptr) {
+        for (int hand = 0; hand < 2; ++hand) {
+            if (!triggerPressed[hand] || !rawUiHits[hand].hit) continue;
+            if (!isPlayerUiDragHandlePixel(rawUiHits[hand].pixelX, rawUiHits[hand].pixelY, modalOpen)) continue;
+            uiPanelDragCandidateActive_ = true;
+            uiPanelDragCandidateHand_ = hand;
+            uiPanelDragStartPixelX_ = rawUiHits[hand].pixelX;
+            uiPanelDragStartPixelY_ = rawUiHits[hand].pixelY;
+            uiPanelDragStartOffsetX_ = uiPanelOffsetX_;
+            uiPanelDragStartOffsetY_ = uiPanelOffsetY_;
+            uiPanelDragStartWorldX_ = rawUiHits[hand].worldX;
+            uiPanelDragStartWorldY_ = rawUiHits[hand].worldY;
+            uiPanelDragStartWorldZ_ = rawUiHits[hand].worldZ;
+            selectedHand = hand;
+            uiRayHits_[hand] = rawUiHits[hand];
+            uiAutoHideFrameBudget_ = kUiAutoHideFrames;
+            XR_LOGI(
+                "DDDVR/OpenXRUi",
+                "XR_UI_PANEL_DRAG_CANDIDATE hand=%d x=%.1f y=%.1f offsetX=%.3f offsetY=%.3f",
+                hand,
+                rawUiHits[hand].pixelX,
+                rawUiHits[hand].pixelY,
+                uiPanelOffsetX_,
+                uiPanelOffsetY_
+            );
+            break;
+        }
+    }
+
     for (int hand = 0; hand < 2; ++hand) {
         if (triggerPressed != nullptr && triggerPressed[hand] && uiRayHits_[hand].hit) {
             selectedHand = hand;
@@ -357,7 +634,12 @@ void OpenXrRenderer::updateUiInteraction(
     if (selectedHand >= 0) {
         activeUiHit_ = uiRayHits_[selectedHand];
         activeUiPointerHand_ = selectedHand;
-        uiPrimaryPressed_ = triggerPressed != nullptr && triggerPressed[selectedHand];
+        const bool suppressUiPress =
+            uiPanelDragActive_ &&
+            selectedHand == uiPanelDragHand_ &&
+            triggerPressed != nullptr &&
+            triggerPressed[selectedHand];
+        uiPrimaryPressed_ = triggerPressed != nullptr && triggerPressed[selectedHand] && !suppressUiPress;
         uiBackend_.setPointerVisible(true);
         uiBackend_.setPointerPixel(activeUiHit_.pixelX, activeUiHit_.pixelY);
         uiBackend_.setPrimaryButton(uiPrimaryPressed_);
@@ -431,13 +713,29 @@ void OpenXrRenderer::setPlayerHoverTarget(CinemaUiHoverTarget target) {
     }
 }
 
-bool OpenXrRenderer::updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters) {
+bool OpenXrRenderer::updateScreenGrab(
+    bool active,
+    const XrPosef& gripPose,
+    float rayDistanceDeltaMeters,
+    bool directTranslationMode
+) {
     if (!active) {
         if (screenGrabActive_) {
             XR_LOGI("DDDVR/OpenXRRenderer", "XR_SCREEN_GRAB_END");
         }
         screenGrabActive_ = false;
+        screenGrabDirectMode_ = false;
         return false;
+    }
+
+    if (screenGrabActive_ && screenGrabDirectMode_ != directTranslationMode) {
+        XR_LOGI(
+            "DDDVR/OpenXRRenderer",
+            "XR_SCREEN_GRAB_MODE_SWITCH old=%d new=%d",
+            screenGrabDirectMode_ ? 1 : 0,
+            directTranslationMode ? 1 : 0
+        );
+        screenGrabActive_ = false;
     }
 
     auto direction = rotateByQuat(gripPose.orientation, 0.f, 0.f, -1.f);
@@ -454,10 +752,12 @@ bool OpenXrRenderer::updateScreenGrab(bool active, const XrPosef& gripPose, floa
 
     if (!screenGrabActive_) {
         screenGrabActive_ = true;
+        screenGrabDirectMode_ = directTranslationMode;
         grabStartPose_ = gripPose;
         grabStartCenterX_ = screenCenterX_;
         grabStartCenterY_ = screenCenterY_;
         grabStartCenterZ_ = screenCenterZ_;
+        grabStartYawRadians_ = screenYawRadians_;
         const float toCenterX = screenCenterX_ - gripPose.position.x;
         const float toCenterY = screenCenterY_ - gripPose.position.y;
         const float toCenterZ = screenCenterZ_ - gripPose.position.z;
@@ -470,12 +770,99 @@ bool OpenXrRenderer::updateScreenGrab(bool active, const XrPosef& gripPose, floa
             kMinScreenDistanceMeters,
             kMaxScreenDistanceMeters
         );
+        if (screenGrabDirectMode_) {
+            grabStartRayDistanceMeters_ = horizontalDistance(screenCenterX_, screenCenterZ_);
+            grabStartRayDistanceMeters_ = clampFloat(
+                grabStartRayDistanceMeters_,
+                kMinScreenDistanceMeters,
+                kMaxScreenDistanceMeters
+            );
+        }
         grabStartOffsetX_ = screenCenterX_ - (gripPose.position.x + direction[0] * grabStartRayDistanceMeters_);
         grabStartOffsetY_ = screenCenterY_ - (gripPose.position.y + direction[1] * grabStartRayDistanceMeters_);
         grabStartOffsetZ_ = screenCenterZ_ - (gripPose.position.z + direction[2] * grabStartRayDistanceMeters_);
-        XR_LOGI("DDDVR/OpenXRRenderer", "XR_SCREEN_GRAB_BEGIN x=%.2f y=%.2f z=%.2f rayDistance=%.2f",
-                screenCenterX_, screenCenterY_, screenCenterZ_, grabStartRayDistanceMeters_);
+        XR_LOGI(
+            "DDDVR/OpenXRRenderer",
+            "XR_SCREEN_GRAB_BEGIN mode=%s x=%.2f y=%.2f z=%.2f rayDistance=%.2f",
+            screenGrabDirectMode_ ? "direct" : "ray",
+            screenCenterX_,
+            screenCenterY_,
+            screenCenterZ_,
+            grabStartRayDistanceMeters_
+        );
         return false;
+    }
+
+    if (screenGrabDirectMode_) {
+        float targetX = grabStartCenterX_ +
+            (gripPose.position.x - grabStartPose_.position.x) * kDirectGrabTranslationScale;
+        float targetY = grabStartCenterY_ +
+            (gripPose.position.y - grabStartPose_.position.y) * kDirectGrabTranslationScale;
+        float targetZ = grabStartCenterZ_ +
+            (gripPose.position.z - grabStartPose_.position.z) * kDirectGrabTranslationScale;
+
+        if (std::fabs(rayDistanceDeltaMeters) > 0.0001f) {
+            grabStartRayDistanceMeters_ = clampFloat(
+                grabStartRayDistanceMeters_ + rayDistanceDeltaMeters,
+                kMinScreenDistanceMeters,
+                kMaxScreenDistanceMeters
+            );
+            screenHighlightFrameBudget_ = 30;
+            static uint32_t directDistanceLogCount = 0;
+            directDistanceLogCount += 1;
+            if (directDistanceLogCount <= 10 || directDistanceLogCount % 30 == 0) {
+                XR_LOGI(
+                    "DDDVR/OpenXRRenderer",
+                    "XR_SCREEN_GRAB_DIRECT_DISTANCE distance=%.2f delta=%.3f",
+                    grabStartRayDistanceMeters_,
+                    rayDistanceDeltaMeters
+                );
+            }
+        }
+        const float targetDistance = horizontalDistance(targetX, targetZ);
+        if (targetDistance > 0.001f) {
+            const float scale = grabStartRayDistanceMeters_ / targetDistance;
+            targetX *= scale;
+            targetZ *= scale;
+        }
+
+        const float targetYaw = std::atan2(targetX, -targetZ);
+        const float moveFromStartX = targetX - grabStartCenterX_;
+        const float moveFromStartY = targetY - grabStartCenterY_;
+        const float moveFromStartZ = targetZ - grabStartCenterZ_;
+        const float movedMeters = std::sqrt(
+            moveFromStartX * moveFromStartX +
+            moveFromStartY * moveFromStartY +
+            moveFromStartZ * moveFromStartZ
+        );
+        const bool consumed = movedMeters > kDirectGrabConsumedMoveThresholdMeters ||
+            std::fabs(normalizeRadians(targetYaw - grabStartYawRadians_)) > kGrabConsumedYawThresholdRadians;
+
+        screenCenterX_ += (targetX - screenCenterX_) * kDirectGrabFollowSmoothing;
+        screenCenterY_ += (targetY - screenCenterY_) * kDirectGrabFollowSmoothing;
+        screenCenterZ_ += (targetZ - screenCenterZ_) * kDirectGrabFollowSmoothing;
+        screenYawRadians_ += normalizeRadians(targetYaw - screenYawRadians_) * kDirectGrabFollowSmoothing;
+        screenYawRadians_ = normalizeRadians(screenYawRadians_);
+        clampScreenCenter();
+        applyScreenPlacement();
+
+        static uint32_t directGrabLogCount = 0;
+        directGrabLogCount += 1;
+        if (directGrabLogCount <= 12 || directGrabLogCount % 30 == 0) {
+            XR_LOGI(
+                "DDDVR/OpenXRRenderer",
+                "XR_SCREEN_GRAB_DIRECT_MOVE x=%.2f y=%.2f z=%.2f yaw=%.3f dx=%.2f dy=%.2f dz=%.2f consumed=%d",
+                screenCenterX_,
+                screenCenterY_,
+                screenCenterZ_,
+                screenYawRadians_,
+                gripPose.position.x - grabStartPose_.position.x,
+                gripPose.position.y - grabStartPose_.position.y,
+                gripPose.position.z - grabStartPose_.position.z,
+                consumed ? 1 : 0
+            );
+        }
+        return consumed;
     }
 
     if (std::fabs(rayDistanceDeltaMeters) > 0.0001f) {
@@ -664,10 +1051,35 @@ void OpenXrRenderer::adjustScreenYaw(float deltaRadians) {
 }
 
 void OpenXrRenderer::adjustScreenDistance(float deltaMeters) {
-    screenDistanceMeters_ += deltaMeters;
-    screenDistanceMeters_ = clampFloat(screenDistanceMeters_, kMinScreenDistanceMeters, kMaxScreenDistanceMeters);
-    updateCenterFromYawDistance();
+    const float currentDistance = horizontalDistance(screenCenterX_, screenCenterZ_);
+    const float baseDistance = currentDistance > 0.001f ? currentDistance : screenDistanceMeters_;
+    const float nextDistance = clampFloat(
+        baseDistance + deltaMeters,
+        kMinScreenDistanceMeters,
+        kMaxScreenDistanceMeters
+    );
+    if (currentDistance > 0.001f) {
+        const float scale = nextDistance / currentDistance;
+        screenCenterX_ *= scale;
+        screenCenterZ_ *= scale;
+    } else {
+        screenCenterX_ = std::sin(screenYawRadians_) * nextDistance;
+        screenCenterZ_ = -std::cos(screenYawRadians_) * nextDistance;
+    }
+    screenDistanceMeters_ = nextDistance;
     applyScreenPlacement();
+    static uint32_t distanceLogCount = 0;
+    distanceLogCount += 1;
+    if (distanceLogCount <= 10 || distanceLogCount % 30 == 0) {
+        XR_LOGI(
+            "DDDVR/OpenXRRenderer",
+            "XR_SCREEN_DISTANCE x=%.2f z=%.2f distance=%.2f delta=%.3f",
+            screenCenterX_,
+            screenCenterZ_,
+            screenDistanceMeters_,
+            deltaMeters
+        );
+    }
 }
 
 void OpenXrRenderer::adjustScreenCurve(float deltaRadians) {
@@ -685,6 +1097,10 @@ void OpenXrRenderer::resetScreenPlacement() {
     screenCenterZ_ = -screenDistanceMeters_;
     screenCurveRadians_ = config_.screenCurveRadians;
     screenGrabActive_ = false;
+    uiPanelOffsetX_ = 0.f;
+    uiPanelOffsetY_ = 0.f;
+    uiPanelDragActive_ = false;
+    uiPanelDragHand_ = -1;
     applyScreenPlacement();
 }
 
@@ -741,6 +1157,9 @@ VrUiPlane OpenXrRenderer::targetUiPlane() const {
         ? desiredPanelWidth
         : kImGuiPanelMaxWidthMeters;
     plane.heightMeters = modalOpen ? kImGuiPanelModalHeightMeters : kImGuiPanelHeightMeters;
+    plane.center.x += plane.right.x * uiPanelOffsetX_ + plane.up.x * uiPanelOffsetY_;
+    plane.center.y += plane.right.y * uiPanelOffsetX_ + plane.up.y * uiPanelOffsetY_;
+    plane.center.z += plane.right.z * uiPanelOffsetX_ + plane.up.z * uiPanelOffsetY_;
     return plane;
 }
 

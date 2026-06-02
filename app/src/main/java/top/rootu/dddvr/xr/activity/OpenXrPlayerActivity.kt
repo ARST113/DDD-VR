@@ -574,7 +574,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     private fun updateOpenXrUiState(reason: String) {
         if (!::bridge.isInitialized) return
-        val playing = !smokeOnly && playerInitialized && playbackSession.isPlaying
+        val playing = !smokeOnly &&
+            playerInitialized &&
+            (playbackSession.isPlaying || playbackSession.wantsToPlay)
         val buffering = !smokeOnly && playerInitialized && playbackSession.isBuffering
         val positionMs = if (!smokeOnly && playerInitialized) playbackSession.currentPositionMs else 0L
         val durationMs = if (!smokeOnly && playerInitialized) playbackSession.durationMs.coerceAtLeast(0L) else 0L
@@ -795,7 +797,11 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     override fun onPlayPause() {
         if (!smokeOnly && playerInitialized) {
-            if (playbackSession.isPlaying) playbackSession.pause() else playbackSession.play()
+            if (playbackSession.isPlaying || playbackSession.wantsToPlay) {
+                playbackSession.pause()
+            } else {
+                playbackSession.play()
+            }
             openXrUiVisible = true
             updateOpenXrUiState("input_play_pause")
         }
@@ -916,7 +922,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         val index = id.removePrefix("playlist:").toIntOrNull() ?: return
         if (index !in 0 until player.mediaItemCount) return
         player.seekToDefaultPosition(index)
-        player.playWhenReady = true
+        playbackSession.play()
         Log.i(TAG, "XR_PLAYLIST_ITEM_SELECTED index=$index")
     }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
