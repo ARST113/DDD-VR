@@ -229,10 +229,9 @@ void VrPlayerPanel::draw() {
 
     auto drawSmallIconButton = [&](const char* id, const ImRect& rect, IconKind icon, const char* tooltipText) {
         ImGui::SetCursorScreenPos(rect.Min);
-        ImGui::InvisibleButton(id, rect.GetSize());
+        const bool clicked = ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip(tooltipText, rect);
 
         const ImU32 bg = active ? IM_COL32(98, 139, 215, 210) :
@@ -247,10 +246,9 @@ void VrPlayerPanel::draw() {
 
     auto drawProjectionButton = [&](const ImRect& rect) {
         ImGui::SetCursorScreenPos(rect.Min);
-        ImGui::InvisibleButton("DDDVR_BTN_PROJECTION", rect.GetSize());
+        const bool clicked = ImGui::InvisibleButton("DDDVR_BTN_PROJECTION", rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip("Режим", rect);
         draw->AddRectFilled(
             rect.Min,
@@ -265,9 +263,8 @@ void VrPlayerPanel::draw() {
 
     auto drawToggle = [&](const char* id, const ImRect& rect, bool enabled, const char* tooltipText) {
         ImGui::SetCursorScreenPos(rect.Min);
-        ImGui::InvisibleButton(id, rect.GetSize());
+        const bool clicked = ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip(tooltipText, rect);
         draw->AddRectFilled(rect.Min, rect.Max, enabled ? IM_COL32(60, 118, 235, 235) : IM_COL32(88, 91, 98, 205), rect.GetHeight() * 0.5f);
         const float knobRadius = rect.GetHeight() * 0.36f;
@@ -293,9 +290,8 @@ void VrPlayerPanel::draw() {
 
     auto drawSegment = [&](const char* id, const ImRect& rect, const char* text, bool selected) {
         ImGui::SetCursorScreenPos(rect.Min);
-        ImGui::InvisibleButton(id, rect.GetSize());
+        const bool clicked = ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         draw->AddRectFilled(
             rect.Min,
             rect.Max,
@@ -308,9 +304,8 @@ void VrPlayerPanel::draw() {
 
     auto drawRowBase = [&](const ImRect& row, bool selected, bool enabled, const char* id) {
         ImGui::SetCursorScreenPos(row.Min);
-        ImGui::InvisibleButton(id, row.GetSize());
+        const bool clicked = ImGui::InvisibleButton(id, row.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         draw->AddRectFilled(
             row.Min,
             row.Max,
@@ -595,11 +590,6 @@ void VrPlayerPanel::draw() {
         requestedTimelineProgressPermille_ = static_cast<int>(std::lround(timelinePreviewProgress_ * 1000.f));
         requestedTimelineProgressPermille_ = std::clamp(requestedTimelineProgressPermille_, 0, 1000);
         timelineDragging_ = false;
-    } else if (!timelineDragging_ && timelineHovered && ImGui::IsMouseReleased(0)) {
-        timelinePreviewProgress_ = progressFromMouse();
-        timelineSeekRequested_ = true;
-        requestedTimelineProgressPermille_ = static_cast<int>(std::lround(timelinePreviewProgress_ * 1000.f));
-        requestedTimelineProgressPermille_ = std::clamp(requestedTimelineProgressPermille_, 0, 1000);
     }
 
     const ImRect leftTime(ImVec2(bar.Min.x + 28.f, bar.Min.y + 15.f), ImVec2(bar.Min.x + 150.f, bar.Min.y + 44.f));

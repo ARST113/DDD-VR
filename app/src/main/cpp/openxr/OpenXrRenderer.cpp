@@ -1,4 +1,5 @@
 #include "OpenXrRenderer.h"
+#include "../ui/VrPlayerTheme.h"
 #include "../util/XrLog.h"
 #include <algorithm>
 #include <array>
@@ -133,6 +134,62 @@ float horizontalDistance(float x, float z) {
 float aimYawFromPose(const XrPosef& pose) {
     const auto direction = rotateByQuat(pose.orientation, 0.f, 0.f, -1.f);
     return std::atan2(direction[0], -direction[2]);
+}
+
+bool insideRect(float x, float y, float minX, float minY, float maxX, float maxY, float padding) {
+    return x >= minX - padding &&
+        x <= maxX + padding &&
+        y >= minY - padding &&
+        y <= maxY + padding;
+}
+
+bool isPlayerUiPixelInteractive(float x, float y, bool modalOpen) {
+    if (x < 0.f || y < 0.f ||
+        x > static_cast<float>(kImGuiUiTextureWidth) ||
+        y > static_cast<float>(kImGuiUiTextureHeight)) {
+        return false;
+    }
+
+    const float canvasX = static_cast<float>(kImGuiUiTextureWidth);
+    const float canvasY = static_cast<float>(kImGuiUiTextureHeight);
+    const float centerX = canvasX * 0.5f;
+    const float barWidth = std::min(VrPlayerTheme::MainBarWidth, canvasX - 120.f);
+    const float barTop = modalOpen
+        ? canvasY - VrPlayerTheme::MainBarHeight - 34.f
+        : canvasY - 190.f;
+    const float barMinX = centerX - barWidth * 0.5f;
+    const float barMaxX = centerX + barWidth * 0.5f;
+    const float barMaxY = barTop + VrPlayerTheme::MainBarHeight;
+    if (insideRect(x, y, barMinX, barTop, barMaxX, barMaxY, 8.f)) {
+        return true;
+    }
+
+    const float handleHeight = modalOpen ? 20.f : VrPlayerTheme::DragHandleHeight;
+    const float handleTop = std::min(
+        barMaxY + (modalOpen ? 6.f : 14.f),
+        canvasY - handleHeight - 8.f
+    );
+    const float handleMinX = centerX - VrPlayerTheme::DragHandleWidth * 0.5f;
+    const float handleMaxX = centerX + VrPlayerTheme::DragHandleWidth * 0.5f;
+    if (insideRect(x, y, handleMinX, handleTop, handleMaxX, handleTop + handleHeight, 10.f)) {
+        return true;
+    }
+
+    if (modalOpen) {
+        const float modalGap = 18.f;
+        const float modalTopMargin = 18.f;
+        const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
+        const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
+        const float modalMinX = centerX - VrPlayerTheme::ModalWidth * 0.5f;
+        const float modalMaxX = centerX + VrPlayerTheme::ModalWidth * 0.5f;
+        const float modalMinY = barTop - modalGap - modalHeight;
+        const float modalMaxY = barTop - modalGap;
+        if (insideRect(x, y, modalMinX, modalMinY, modalMaxX, modalMaxY, 10.f)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 }
 
@@ -276,6 +333,14 @@ void OpenXrRenderer::updateUiInteraction(
             uiBackend_.height(),
             hand
         );
+        if (uiRayHits_[hand].hit &&
+            !isPlayerUiPixelInteractive(
+                uiRayHits_[hand].pixelX,
+                uiRayHits_[hand].pixelY,
+                uiModalOpen_.load()
+            )) {
+            uiRayHits_[hand] = {};
+        }
         screenRayHits_[hand] = screenHitTest(rays[hand].pose, hand);
     }
 
