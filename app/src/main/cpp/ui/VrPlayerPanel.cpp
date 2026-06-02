@@ -232,7 +232,7 @@ void VrPlayerPanel::draw() {
         ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool clicked = ImGui::IsItemClicked(0);
+        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip(tooltipText, rect);
 
         const ImU32 bg = active ? IM_COL32(98, 139, 215, 210) :
@@ -241,7 +241,7 @@ void VrPlayerPanel::draw() {
         if (hovered || active) {
             draw->AddRectFilled(rect.Min, rect.Max, bg, 15.f);
         }
-        drawIcon(draw, rect, icon, hovered ? IM_COL32(255, 255, 255, 250) : IM_COL32(224, 232, 246, 220));
+        drawIcon(draw, rect, icon, hovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(250, 252, 255, 238));
         return clicked;
     };
 
@@ -250,7 +250,7 @@ void VrPlayerPanel::draw() {
         ImGui::InvisibleButton("DDDVR_BTN_PROJECTION", rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
-        const bool clicked = ImGui::IsItemClicked(0);
+        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip("Режим", rect);
         draw->AddRectFilled(
             rect.Min,
@@ -259,7 +259,7 @@ void VrPlayerPanel::draw() {
             15.f
         );
         const std::string label = state_.projectionModeLabel.empty() ? "2D" : state_.projectionModeLabel;
-        drawCenteredText(draw, rect, label.c_str(), hovered ? IM_COL32(255, 255, 255, 250) : IM_COL32(224, 232, 246, 220));
+        drawCenteredText(draw, rect, label.c_str(), hovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(250, 252, 255, 238));
         return clicked;
     };
 
@@ -267,7 +267,7 @@ void VrPlayerPanel::draw() {
         ImGui::SetCursorScreenPos(rect.Min);
         ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0);
+        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         if (hovered) setTooltip(tooltipText, rect);
         draw->AddRectFilled(rect.Min, rect.Max, enabled ? IM_COL32(60, 118, 235, 235) : IM_COL32(88, 91, 98, 205), rect.GetHeight() * 0.5f);
         const float knobRadius = rect.GetHeight() * 0.36f;
@@ -295,7 +295,7 @@ void VrPlayerPanel::draw() {
         ImGui::SetCursorScreenPos(rect.Min);
         ImGui::InvisibleButton(id, rect.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0);
+        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         draw->AddRectFilled(
             rect.Min,
             rect.Max,
@@ -310,7 +310,7 @@ void VrPlayerPanel::draw() {
         ImGui::SetCursorScreenPos(row.Min);
         ImGui::InvisibleButton(id, row.GetSize());
         const bool hovered = ImGui::IsItemHovered();
-        const bool clicked = ImGui::IsItemClicked(0);
+        const bool clicked = ImGui::IsItemClicked(0) || (hovered && ImGui::IsMouseReleased(0));
         draw->AddRectFilled(
             row.Min,
             row.Max,
@@ -529,7 +529,7 @@ void VrPlayerPanel::draw() {
     }
 
     draw->AddRectFilled(bar.Min, bar.Max, VrPlayerTheme::BarBg, VrPlayerTheme::MainBarRounding);
-    draw->AddRectFilled(bar.Min, ImVec2(bar.Max.x, bar.Min.y + 48.f), IM_COL32(255, 255, 255, 14), VrPlayerTheme::MainBarRounding, ImDrawFlags_RoundCornersTop);
+    draw->AddRectFilled(bar.Min, ImVec2(bar.Max.x, bar.Min.y + 50.f), IM_COL32(255, 255, 255, 8), VrPlayerTheme::MainBarRounding, ImDrawFlags_RoundCornersTop);
     if (buffered > progress) {
         ImRect bufferedRect = bar;
         bufferedRect.Max.x = bar.Min.x + bar.GetWidth() * buffered;
@@ -592,8 +592,14 @@ void VrPlayerPanel::draw() {
     if (timelineDragging_ && ImGui::IsMouseReleased(0)) {
         timelinePreviewProgress_ = progressFromMouse();
         timelineSeekRequested_ = true;
-        requestedTimelinePositionMs_ = static_cast<int64_t>(static_cast<float>(durationMs) * timelinePreviewProgress_);
+        requestedTimelineProgressPermille_ = static_cast<int>(std::lround(timelinePreviewProgress_ * 1000.f));
+        requestedTimelineProgressPermille_ = std::clamp(requestedTimelineProgressPermille_, 0, 1000);
         timelineDragging_ = false;
+    } else if (!timelineDragging_ && timelineHovered && ImGui::IsMouseReleased(0)) {
+        timelinePreviewProgress_ = progressFromMouse();
+        timelineSeekRequested_ = true;
+        requestedTimelineProgressPermille_ = static_cast<int>(std::lround(timelinePreviewProgress_ * 1000.f));
+        requestedTimelineProgressPermille_ = std::clamp(requestedTimelineProgressPermille_, 0, 1000);
     }
 
     const ImRect leftTime(ImVec2(bar.Min.x + 28.f, bar.Min.y + 15.f), ImVec2(bar.Min.x + 150.f, bar.Min.y + 44.f));
@@ -606,18 +612,18 @@ void VrPlayerPanel::draw() {
     const ImRect titleRect(ImVec2(bar.Min.x + 165.f, bar.Min.y + 12.f), ImVec2(bar.Max.x - 165.f, bar.Min.y + 46.f));
     const ImVec2 titleSize = ImGui::CalcTextSize(title.c_str());
     draw->PushClipRect(titleRect.Min, titleRect.Max, true);
-    draw->AddText(ImVec2(titleRect.GetCenter().x - titleSize.x * 0.5f, titleRect.Min.y + 6.f), IM_COL32(226, 232, 244, 166), title.c_str());
+    draw->AddText(ImVec2(titleRect.GetCenter().x - titleSize.x * 0.5f, titleRect.Min.y + 6.f), IM_COL32(242, 246, 255, 192), title.c_str());
     draw->PopClipRect();
 
-    const float buttonCenterY = bar.Min.y + 98.f;
-    const ImRect playlistButton = centeredRect(bar.Min.x + 70.f, buttonCenterY, 66.f, 56.f);
-    const ImRect volumeButton = centeredRect(bar.Min.x + 138.f, buttonCenterY, 66.f, 56.f);
-    const ImRect prevButton = centeredRect(centerX - 122.f, buttonCenterY, 70.f, 58.f);
-    const ImRect playButton = centeredRect(centerX, buttonCenterY, 82.f, 66.f);
-    const ImRect nextButton = centeredRect(centerX + 122.f, buttonCenterY, 70.f, 58.f);
-    const ImRect envButton = centeredRect(bar.Max.x - 250.f, buttonCenterY, 66.f, 56.f);
-    const ImRect projectionButton = centeredRect(bar.Max.x - 168.f, buttonCenterY, 72.f, 56.f);
-    const ImRect moreButton = centeredRect(bar.Max.x - 86.f, buttonCenterY, 66.f, 56.f);
+    const float buttonCenterY = bar.Min.y + 110.f;
+    const ImRect playlistButton = centeredRect(bar.Min.x + 70.f, buttonCenterY, 66.f, 54.f);
+    const ImRect volumeButton = centeredRect(bar.Min.x + 138.f, buttonCenterY, 66.f, 54.f);
+    const ImRect prevButton = centeredRect(centerX - 122.f, buttonCenterY, 70.f, 56.f);
+    const ImRect playButton = centeredRect(centerX, buttonCenterY, 82.f, 60.f);
+    const ImRect nextButton = centeredRect(centerX + 122.f, buttonCenterY, 70.f, 56.f);
+    const ImRect envButton = centeredRect(bar.Max.x - 250.f, buttonCenterY, 66.f, 54.f);
+    const ImRect projectionButton = centeredRect(bar.Max.x - 168.f, buttonCenterY, 72.f, 54.f);
+    const ImRect moreButton = centeredRect(bar.Max.x - 86.f, buttonCenterY, 66.f, 54.f);
 
     if (drawSmallIconButton("DDDVR_BTN_PLAYLIST", playlistButton, IconKind::Playlist, "Плейлист")) {
         pushAction(VrPlayerPanelActionType::TogglePlaylist);
@@ -719,10 +725,10 @@ bool VrPlayerPanel::consumeRecenterRequested() {
     return value;
 }
 
-bool VrPlayerPanel::consumeTimelineSeekRequested(int64_t* outPositionMs) {
+bool VrPlayerPanel::consumeTimelineSeekRequested(int* outProgressPermille) {
     const bool value = timelineSeekRequested_;
-    if (value && outPositionMs != nullptr) {
-        *outPositionMs = requestedTimelinePositionMs_;
+    if (value && outProgressPermille != nullptr) {
+        *outProgressPermille = requestedTimelineProgressPermille_;
     }
     timelineSeekRequested_ = false;
     return value;

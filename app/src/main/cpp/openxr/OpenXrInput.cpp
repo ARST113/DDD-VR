@@ -11,8 +11,8 @@ namespace {
 constexpr float kThumbstickPressThreshold = 0.65f;
 constexpr float kThumbstickReleaseThreshold = 0.35f;
 constexpr float kThumbstickMoveDeadzone = 0.18f;
-constexpr float kTriggerPressThreshold = 0.72f;
-constexpr float kTriggerReleaseThreshold = 0.22f;
+constexpr float kTriggerPressThreshold = 0.45f;
+constexpr float kTriggerReleaseThreshold = 0.18f;
 constexpr float kSqueezePressThreshold = 0.55f;
 constexpr float kSqueezeReleaseThreshold = 0.20f;
 constexpr std::chrono::milliseconds kThumbstickRepeatDelay(350);
@@ -98,6 +98,8 @@ bool OpenXrInput::initialize(XrInstance instance, XrSession session, ActionCallb
         bind(triggerAction_, "/user/hand/right/input/trigger/value"),
         bind(triggerClickAction_, "/user/hand/left/input/trigger/click"),
         bind(triggerClickAction_, "/user/hand/right/input/trigger/click"),
+        bind(triggerClickAction_, "/user/hand/left/input/select/click"),
+        bind(triggerClickAction_, "/user/hand/right/input/select/click"),
         bind(squeezeAction_, "/user/hand/left/input/squeeze/value"),
         bind(squeezeAction_, "/user/hand/right/input/squeeze/value"),
         bind(squeezeClickAction_, "/user/hand/left/input/squeeze/click"),
@@ -111,11 +113,12 @@ bool OpenXrInput::initialize(XrInstance instance, XrSession session, ActionCallb
         bind(thumbstickClickAction_, "/user/hand/left/input/thumbstick/click"),
         bind(thumbstickClickAction_, "/user/hand/right/input/thumbstick/click")
     };
-    suggestBindings("/interaction_profiles/oculus/touch_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/bytedance/pico4_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/pico/pico4_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/pico/neo3_controller", touchBindings, 18);
+    const uint32_t touchBindingCount = static_cast<uint32_t>(sizeof(touchBindings) / sizeof(touchBindings[0]));
+    suggestBindings("/interaction_profiles/oculus/touch_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/bytedance/pico4_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/pico/pico4_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/pico/neo3_controller", touchBindings, touchBindingCount);
 
     XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     attachInfo.countActionSets = 1;

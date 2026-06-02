@@ -806,9 +806,8 @@ void OpenXrRenderer::queuePlayerPanelActions() {
         pendingUiSeekForward_ = true;
         XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_forward");
     }
-    int64_t requestedPositionMs = 0;
-    if (playerPanel_.consumeTimelineSeekRequested(&requestedPositionMs)) {
-        int progressPermille = static_cast<int>(requestedPositionMs);
+    int progressPermille = 0;
+    if (playerPanel_.consumeTimelineSeekRequested(&progressPermille)) {
         if (progressPermille < 0) progressPermille = 0;
         if (progressPermille > 1000) progressPermille = 1000;
         const auto now = std::chrono::steady_clock::now();

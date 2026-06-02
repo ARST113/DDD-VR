@@ -125,7 +125,7 @@ public:
     bool consumeSeekForwardRequested();
     bool consumeExitRequested();
     bool consumeRecenterRequested();
-    bool consumeTimelineSeekRequested(int64_t* outPositionMs);
+    bool consumeTimelineSeekRequested(int* outProgressPermille);
     bool consumeAudioTrackSelected(int* outTrackIndex);
     bool consumeAction(VrPlayerPanelAction* outAction);
 
@@ -147,6 +147,6 @@ private:
     float scrubPreviewProgress_ = 0.f;
     float tooltipX_ = -1.f;
     double lastScrubActivitySeconds_ = 0.0;
-    int64_t requestedTimelinePositionMs_ = 0;
+    int requestedTimelineProgressPermille_ = 0;
     int requestedAudioTrackIndex_ = -1;
 };

@@ -4,7 +4,7 @@
 
 namespace VrPlayerTheme {
 constexpr float MainBarWidth = 1080.0f;
-constexpr float MainBarHeight = 140.0f;
+constexpr float MainBarHeight = 146.0f;
 constexpr float MainBarRounding = 34.0f;
 
 constexpr float ModalWidth = 560.0f;
@@ -16,15 +16,15 @@ constexpr float DragHandleWidth = 170.0f;
 constexpr float DragHandleHeight = 22.0f;
 constexpr float DragHandleRounding = 11.0f;
 
-const ImU32 BarBg = IM_COL32(18, 20, 25, 218);
-const ImU32 BarBorder = IM_COL32(230, 240, 255, 38);
-const ImU32 ProgressFill = IM_COL32(88, 122, 184, 132);
-const ImU32 ProgressEdge = IM_COL32(225, 238, 255, 180);
+const ImU32 BarBg = IM_COL32(0, 0, 0, 226);
+const ImU32 BarBorder = IM_COL32(245, 248, 255, 44);
+const ImU32 ProgressFill = IM_COL32(74, 110, 180, 126);
+const ImU32 ProgressEdge = IM_COL32(240, 248, 255, 196);
 
-const ImU32 ModalBg = IM_COL32(35, 35, 38, 234);
-const ImU32 RowBg = IM_COL32(58, 58, 62, 170);
-const ImU32 RowHover = IM_COL32(76, 84, 105, 210);
-const ImU32 TextPrimary = IM_COL32(248, 250, 255, 248);
-const ImU32 TextMuted = IM_COL32(221, 228, 242, 184);
+const ImU32 ModalBg = IM_COL32(0, 0, 0, 236);
+const ImU32 RowBg = IM_COL32(10, 10, 12, 184);
+const ImU32 RowHover = IM_COL32(36, 48, 72, 220);
+const ImU32 TextPrimary = IM_COL32(255, 255, 255, 252);
+const ImU32 TextMuted = IM_COL32(232, 238, 248, 196);
 const ImU32 AccentBlue = IM_COL32(90, 145, 255, 235);
 }
