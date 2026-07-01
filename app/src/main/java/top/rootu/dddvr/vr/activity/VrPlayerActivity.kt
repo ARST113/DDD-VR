@@ -174,8 +174,8 @@ class VrPlayerActivity : AppCompatActivity() {
         val config = request.vrConfig
         val stereoMode = when {
             request.hasStereoLayoutExtra && config.stereoLayout == StereoLayout.MONO -> StereoInputMode.MONO
-            config.stereoLayout == StereoLayout.SBS -> StereoInputMode.SBS
-            config.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
+            request.hasStereoLayoutExtra && config.stereoLayout == StereoLayout.SBS -> StereoInputMode.SBS
+            request.hasStereoLayoutExtra && config.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
             else -> request.stereoInputMode
         }
 

@@ -35,7 +35,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
     const char* fs =
         "#version 300 es\n"
         "#extension GL_OES_EGL_image_external_essl3 : require\n"
-        "precision mediump float;"
+        "precision highp float;"
         "in vec2 vTexCoord;"
         "uniform samplerExternalOES uTexture;"
         "uniform mat4 uTexMatrix;"

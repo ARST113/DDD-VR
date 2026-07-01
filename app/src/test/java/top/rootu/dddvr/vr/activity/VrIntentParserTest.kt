@@ -113,6 +113,23 @@ class VrIntentParserTest {
     }
 
     @Test
+    fun `uses stereo layout aliases as stereo mode fallback without mono override`() {
+        val sbsIntent = mockedIntent(stringExtras = mapOf("stereo_layout" to "rl"))
+        val ouIntent = mockedIntent(stringExtras = mapOf("stereo_layout" to "ba"))
+
+        val sbsParsed = VrIntentParser.parse(sbsIntent)
+        val ouParsed = VrIntentParser.parse(ouIntent)
+
+        requireNotNull(sbsParsed)
+        requireNotNull(ouParsed)
+        assertEquals(StereoInputMode.SBS_REVERSED, sbsParsed.stereoInputMode)
+        assertEquals(StereoLayout.MONO, sbsParsed.vrConfig.stereoLayout)
+        assertEquals(false, sbsParsed.hasStereoLayoutExtra)
+        assertEquals(StereoInputMode.OU_REVERSED, ouParsed.stereoInputMode)
+        assertEquals(StereoLayout.MONO, ouParsed.vrConfig.stereoLayout)
+        assertEquals(false, ouParsed.hasStereoLayoutExtra)
+    }
+    @Test
     fun `infers over under stereo mode from filename`() {
         val intent = mockedIntent(uriLastPathSegment = "Avatar 2 (2022) 3D-hOU.mkv")
 
@@ -130,5 +147,52 @@ class VrIntentParserTest {
 
         requireNotNull(parsed)
         assertEquals(StereoInputMode.OU, parsed.stereoInputMode)
+    }
+    @Test
+    fun `infers sbs stereo mode when marker starts filename`() {
+        val intent = mockedIntent(uriLastPathSegment = "SBS.Avatar.The.Way.of.Water.mkv")
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoInputMode.SBS, parsed.stereoInputMode)
+    }
+
+    @Test
+    fun `infers compact full sbs 3d marker from stream url`() {
+        val intent = mockedIntent(uriLastPathSegment = "AvatarTheWayofWater 2022 (1080p24fpsH264FullSBS3D).mkv")
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoInputMode.SBS, parsed.stereoInputMode)
+    }
+
+    @Test
+    fun `infers reversed stereo modes from filename aliases`() {
+        val sbsIntent = mockedIntent(uriLastPathSegment = "Movie.3D.RL.mkv")
+        val ouIntent = mockedIntent(uriLastPathSegment = "Movie.3D.BA.mkv")
+
+        val sbsParsed = VrIntentParser.parse(sbsIntent)
+        val ouParsed = VrIntentParser.parse(ouIntent)
+
+        requireNotNull(sbsParsed)
+        requireNotNull(ouParsed)
+        assertEquals(StereoInputMode.SBS_REVERSED, sbsParsed.stereoInputMode)
+        assertEquals(StereoInputMode.OU_REVERSED, ouParsed.stereoInputMode)
+    }
+
+    @Test
+    fun `parses vr cam stereo modes`() {
+        val v1Intent = mockedIntent(stringExtras = mapOf("stereo_mode" to "vr-cam-v1"))
+        val v2Intent = mockedIntent(uriLastPathSegment = "Avatar.vrcam2.mkv")
+
+        val v1Parsed = VrIntentParser.parse(v1Intent)
+        val v2Parsed = VrIntentParser.parse(v2Intent)
+
+        requireNotNull(v1Parsed)
+        requireNotNull(v2Parsed)
+        assertEquals(StereoInputMode.VR_CAM_V1, v1Parsed.stereoInputMode)
+        assertEquals(StereoInputMode.VR_CAM_V2, v2Parsed.stereoInputMode)
     }
 }

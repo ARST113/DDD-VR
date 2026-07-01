@@ -9,17 +9,30 @@
 #include <GLES3/gl3.h>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+#include <string>
+#include <vector>
 
 enum class OpenXrStereoMode {
     Mono,
     Sbs,
     SbsReversed,
     Ou,
-    OuReversed
+    OuReversed,
+    VrCamV1,
+    VrCamV2
+};
+
+enum class OpenXrScreenModeNative {
+    Flat,
+    Curved,
+    Vr180,
+    Vr360
 };
 
 struct OpenXrRenderConfig {
     OpenXrStereoMode stereoMode = OpenXrStereoMode::Mono;
+    OpenXrScreenModeNative screenMode = OpenXrScreenModeNative::Flat;
     bool swapEyes = false;
     float screenDistanceMeters = 3.5f;
     float screenWidthMeters = 4.5f;
@@ -30,14 +43,34 @@ class OpenXrRenderer {
 public:
     bool initialize(const OpenXrRenderConfig& config);
     void setVideoFrameState(const float* transformMatrix, bool hasVideo);
-    void setUiState(bool visible, int progressPermille, bool playing);
+    void setUiState(
+        bool visible,
+        bool playing,
+        bool buffering,
+        int64_t positionMs,
+        int64_t durationMs,
+        int64_t bufferedPositionMs,
+        const std::string& title,
+        const std::string& stereoModeLabel,
+        const std::string& audioTrackLabel,
+        const std::vector<std::string>& audioTrackLabels,
+        int selectedAudioTrackIndex
+    );
+    void setPlayerUiState(const VrPlayerUiState& state);
     void setPointerRays(const OpenXrPointerRay rays[2]);
     void updateUiInteraction(const OpenXrPointerRay rays[2], const bool triggerPressed[2], bool active);
     int activeUiPointerHand() const { return activeUiPointerHand_; }
     bool consumeUiInputAction(OpenXrInputActionCode* outAction);
     bool consumeUiTimelineSeek(int* outProgressPermille);
+    bool consumeUiAudioTrackSelection(int* outTrackIndex);
+    bool consumePlayerPanelAction(VrPlayerPanelAction* outAction);
     void setPlayerHoverTarget(CinemaUiHoverTarget target);
-    bool updateScreenGrab(bool active, const XrPosef& gripPose, float rayDistanceDeltaMeters);
+    bool updateScreenGrab(
+        bool active,
+        const XrPosef& gripPose,
+        float rayDistanceDeltaMeters,
+        bool directTranslationMode = false
+    );
     bool seekProgressFromPointer(const XrPosef& aimPose, int* outProgressPermille);
     CinemaUiHoverTarget playerHoverTarget(const XrPosef& aimPose) const;
     void adjustScreenYaw(float deltaRadians);
@@ -77,7 +110,10 @@ private:
     bool pendingUiSeekBack_ = false;
     bool pendingUiSeekForward_ = false;
     bool pendingUiTimelineSeek_ = false;
+    bool pendingUiAudioTrackSelected_ = false;
+    std::vector<VrPlayerPanelAction> pendingPlayerPanelActions_;
     int pendingUiTimelineProgressPermille_ = 0;
+    int pendingUiAudioTrackIndex_ = -1;
     int lastUiTimelineQueuedProgressPermille_ = -1;
     std::chrono::steady_clock::time_point lastUiTimelineSeekQueued_{};
     float screenYawRadians_ = 0.f;
@@ -86,7 +122,20 @@ private:
     float screenCenterY_ = 0.f;
     float screenCenterZ_ = -3.5f;
     float screenCurveRadians_ = 0.45f;
+    float uiPanelOffsetX_ = 0.f;
+    float uiPanelOffsetY_ = 0.f;
+    float uiPanelDragStartPixelX_ = 0.f;
+    float uiPanelDragStartPixelY_ = 0.f;
+    float uiPanelDragStartOffsetX_ = 0.f;
+    float uiPanelDragStartOffsetY_ = 0.f;
+    float uiPanelDragStartWorldX_ = 0.f;
+    float uiPanelDragStartWorldY_ = 0.f;
+    float uiPanelDragStartWorldZ_ = 0.f;
     bool screenGrabActive_ = false;
+    bool uiPanelDragCandidateActive_ = false;
+    bool uiPanelDragActive_ = false;
+    int uiPanelDragCandidateHand_ = -1;
+    int uiPanelDragHand_ = -1;
     XrPosef grabStartPose_{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
     float grabStartRayDistanceMeters_ = 3.5f;
     float grabStartOffsetX_ = 0.f;
@@ -95,6 +144,8 @@ private:
     float grabStartCenterX_ = 0.f;
     float grabStartCenterY_ = 0.f;
     float grabStartCenterZ_ = -3.5f;
+    float grabStartYawRadians_ = 0.f;
+    bool screenGrabDirectMode_ = false;
     int screenHighlightFrameBudget_ = 0;
     float videoTransform_[16] = {
         1.f, 0.f, 0.f, 0.f,
@@ -103,7 +154,9 @@ private:
         0.f, 0.f, 0.f, 1.f
     };
     bool hasVideoFrame_ = false;
+    std::mutex playerPanelMutex_;
     std::atomic<bool> uiVisible_{true};
+    std::atomic<bool> uiModalOpen_{false};
     std::atomic<int> uiProgressPermille_{0};
     std::atomic<bool> uiPlaying_{false};
     int uiAutoHideFrameBudget_ = 0;

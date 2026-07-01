@@ -63,6 +63,7 @@ private:
     void pollSqueeze();
     void pollThumbstick();
     void pollThumbstickClick();
+    void logInteractionProfiles();
     bool shouldEmitTriggerTap(int hand, std::chrono::steady_clock::time_point now) const;
     void emit(OpenXrInputActionCode code);
 
@@ -102,6 +103,7 @@ private:
     std::chrono::steady_clock::time_point lastFrameControlsTime_{};
     std::chrono::steady_clock::time_point lastPlayPauseEmit_{};
     std::chrono::steady_clock::time_point lastPointerActivity_{};
+    XrPath currentInteractionProfiles_[2]{XR_NULL_PATH, XR_NULL_PATH};
     OpenXrFrameControls pendingFrameControls_{};
     bool initialized_ = false;
 };

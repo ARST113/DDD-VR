@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "OpenXrInput.h"
 #include "OpenXrRenderer.h"
@@ -20,7 +21,20 @@ public:
 
     void setJavaBridge(JNIEnv* env, jobject bridge);
     void setVideoSize(int32_t width, int32_t height);
-    void setUiState(bool visible, int32_t progressPermille, bool playing);
+    void setUiState(
+        bool visible,
+        bool playing,
+        bool buffering,
+        int64_t positionMs,
+        int64_t durationMs,
+        int64_t bufferedPositionMs,
+        const std::string& title,
+        const std::string& stereoModeLabel,
+        const std::string& audioTrackLabel,
+        const std::vector<std::string>& audioTrackLabels,
+        int selectedAudioTrackIndex
+    );
+    void setPlayerUiState(const VrPlayerUiState& state);
 
     bool initialize();
     bool start();
@@ -39,6 +53,8 @@ private:
     void detachCurrentThread(bool didAttach) const;
     void dispatchInputActionOnRenderThread(OpenXrInputActionCode code);
     void dispatchTimelineSeekOnRenderThread(int32_t progressPermille);
+    void dispatchAudioTrackSelectedOnRenderThread(int32_t trackIndex);
+    void dispatchPlayerUiActionOnRenderThread(const VrPlayerPanelAction& action);
     bool createVideoSurfaceOnRenderThread();
     bool updateVideoSurfaceOnRenderThread();
     void applyPendingVideoSizeOnRenderThread(JNIEnv* env);
@@ -78,6 +94,8 @@ private:
     jmethodID bridgeOnVideoSurfaceReady_ = nullptr;
     jmethodID bridgeOnInputAction_ = nullptr;
     jmethodID bridgeOnTimelineSeek_ = nullptr;
+    jmethodID bridgeOnAudioTrackSelected_ = nullptr;
+    jmethodID bridgeOnPlayerUiAction_ = nullptr;
     jmethodID videoSurfaceCtor_ = nullptr;
     jmethodID videoSurfaceGetSurface_ = nullptr;
     jmethodID videoSurfaceUpdateTexImage_ = nullptr;

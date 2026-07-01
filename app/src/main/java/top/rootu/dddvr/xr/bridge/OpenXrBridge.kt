@@ -8,6 +8,8 @@ import android.util.Log
 import android.view.Surface
 import top.rootu.dddvr.xr.input.OpenXrInputMapper
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
+import top.rootu.dddvr.xr.ui.OpenXrPlayerUiAction
+import top.rootu.dddvr.xr.ui.OpenXrPlayerUiState
 
 class OpenXrBridge(
     private val activity: Activity,
@@ -47,9 +49,39 @@ class OpenXrBridge(
         nativeSetVideoSize(nativeHandle, width, height)
     }
 
-    fun setUiState(visible: Boolean, progressPermille: Int, playing: Boolean) {
+    fun setUiState(
+        visible: Boolean,
+        playing: Boolean,
+        buffering: Boolean,
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        title: String,
+        stereoModeLabel: String,
+        audioTrackLabel: String,
+        audioTrackLabels: Array<String>,
+        selectedAudioTrackIndex: Int
+    ) {
         if (nativeHandle == 0L) return
-        nativeSetUiState(nativeHandle, visible, progressPermille.coerceIn(0, 1000), playing)
+        nativeSetUiState(
+            nativeHandle,
+            visible,
+            playing,
+            buffering,
+            positionMs.coerceAtLeast(0L),
+            durationMs.coerceAtLeast(0L),
+            bufferedPositionMs.coerceAtLeast(0L),
+            title,
+            stereoModeLabel,
+            audioTrackLabel,
+            audioTrackLabels,
+            selectedAudioTrackIndex
+        )
+    }
+
+    fun setPlayerUiState(state: OpenXrPlayerUiState) {
+        if (nativeHandle == 0L) return
+        nativeSetPlayerUiState(nativeHandle, state)
     }
 
     fun destroy() {
@@ -85,6 +117,22 @@ class OpenXrBridge(
     }
 
     @Suppress("unused")
+    private fun onAudioTrackSelectedFromNative(trackIndex: Int) {
+        mainHandler.post { callbacks.onSelectAudioTrack(trackIndex) }
+    }
+
+    @Suppress("unused")
+    private fun onPlayerUiActionFromNative(
+        actionType: Int,
+        intValue: Int,
+        floatValue: Float,
+        stringValue: String?
+    ) {
+        val action = OpenXrPlayerUiAction.fromNative(actionType, intValue, floatValue, stringValue)
+        mainHandler.post { callbacks.onPlayerUiAction(action) }
+    }
+
+    @Suppress("unused")
     private fun onNativeLog(message: String) {
         Log.i("DDDVR/OpenXR", message)
     }
@@ -94,6 +142,8 @@ class OpenXrBridge(
         fun onPlayPause()
         fun onSeekBy(deltaMs: Long)
         fun onSeekToProgress(progressPermille: Int)
+        fun onSelectAudioTrack(trackIndex: Int)
+        fun onPlayerUiAction(action: OpenXrPlayerUiAction)
         fun onRecenter()
         fun onShowMenu()
         fun onExit()
@@ -104,7 +154,21 @@ class OpenXrBridge(
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativeSetVideoSize(handle: Long, width: Int, height: Int)
-    private external fun nativeSetUiState(handle: Long, visible: Boolean, progressPermille: Int, playing: Boolean)
+    private external fun nativeSetUiState(
+        handle: Long,
+        visible: Boolean,
+        playing: Boolean,
+        buffering: Boolean,
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        title: String,
+        stereoModeLabel: String,
+        audioTrackLabel: String,
+        audioTrackLabels: Array<String>,
+        selectedAudioTrackIndex: Int
+    )
+    private external fun nativeSetPlayerUiState(handle: Long, state: OpenXrPlayerUiState)
     private external fun nativeDestroy(handle: Long)
 
     companion object {

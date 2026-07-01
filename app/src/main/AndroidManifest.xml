@@ -383,6 +383,8 @@
             android:exported="true"
             android:theme="@style/Theme.App.OpenXrFullscreen"
             android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:resizeableActivity="false"
             android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
             <meta-data
@@ -430,6 +432,8 @@
             android:exported="true"
             android:theme="@style/Theme.App.OpenXrFullscreen"
             android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:resizeableActivity="false"
             android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
             <meta-data
@@ -441,6 +445,8 @@
             android:exported="true"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:excludeFromRecents="false"
             android:resizeableActivity="false"
             android:configChanges="screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode|density">

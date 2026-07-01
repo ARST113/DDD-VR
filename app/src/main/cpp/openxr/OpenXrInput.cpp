@@ -11,10 +11,10 @@ namespace {
 constexpr float kThumbstickPressThreshold = 0.65f;
 constexpr float kThumbstickReleaseThreshold = 0.35f;
 constexpr float kThumbstickMoveDeadzone = 0.18f;
-constexpr float kTriggerPressThreshold = 0.72f;
-constexpr float kTriggerReleaseThreshold = 0.22f;
-constexpr float kSqueezePressThreshold = 0.55f;
-constexpr float kSqueezeReleaseThreshold = 0.20f;
+constexpr float kTriggerPressThreshold = 0.45f;
+constexpr float kTriggerReleaseThreshold = 0.18f;
+constexpr float kSqueezePressThreshold = 0.25f;
+constexpr float kSqueezeReleaseThreshold = 0.10f;
 constexpr std::chrono::milliseconds kThumbstickRepeatDelay(350);
 constexpr std::chrono::milliseconds kTimelineSeekDragInterval(90);
 constexpr std::chrono::milliseconds kTriggerTapDebounce(550);
@@ -111,11 +111,12 @@ bool OpenXrInput::initialize(XrInstance instance, XrSession session, ActionCallb
         bind(thumbstickClickAction_, "/user/hand/left/input/thumbstick/click"),
         bind(thumbstickClickAction_, "/user/hand/right/input/thumbstick/click")
     };
-    suggestBindings("/interaction_profiles/oculus/touch_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/bytedance/pico4_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/pico/pico4_controller", touchBindings, 18);
-    suggestBindings("/interaction_profiles/pico/neo3_controller", touchBindings, 18);
+    const uint32_t touchBindingCount = static_cast<uint32_t>(sizeof(touchBindings) / sizeof(touchBindings[0]));
+    suggestBindings("/interaction_profiles/oculus/touch_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/bytedance/pico4_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/pico/pico4_controller", touchBindings, touchBindingCount);
+    suggestBindings("/interaction_profiles/pico/neo3_controller", touchBindings, touchBindingCount);
 
     XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     attachInfo.countActionSets = 1;
@@ -162,6 +163,39 @@ void OpenXrInput::sync() {
     pollSqueeze();
     pollThumbstickClick();
     pollThumbstick();
+    logInteractionProfiles();
+}
+
+void OpenXrInput::logInteractionProfiles() {
+    if (!initialized_ || session_ == XR_NULL_HANDLE || instance_ == XR_NULL_HANDLE) return;
+    for (int hand = 0; hand < 2; ++hand) {
+        XrInteractionProfileState profileState{XR_TYPE_INTERACTION_PROFILE_STATE};
+        const XrResult result = xrGetCurrentInteractionProfile(
+            session_,
+            handSubactionPaths_[hand],
+            &profileState
+        );
+        if (result != XR_SUCCESS || profileState.interactionProfile == currentInteractionProfiles_[hand]) {
+            continue;
+        }
+        currentInteractionProfiles_[hand] = profileState.interactionProfile;
+        char pathBuffer[XR_MAX_PATH_LENGTH]{};
+        uint32_t written = 0;
+        const XrResult pathResult = xrPathToString(
+            instance_,
+            profileState.interactionProfile,
+            XR_MAX_PATH_LENGTH,
+            &written,
+            pathBuffer
+        );
+        XR_LOGI(
+            "DDDVR/OpenXRInput",
+            "XR_INPUT_PROFILE hand=%d path=%s result=%d",
+            hand,
+            pathResult == XR_SUCCESS ? pathBuffer : "<unknown>",
+            result
+        );
+    }
 }
 
 void OpenXrInput::destroy() {
@@ -211,6 +245,8 @@ void OpenXrInput::destroy() {
     lastTriggerTimelineSeekEmit_[1] = {};
     lastPlayPauseEmit_ = {};
     lastPointerActivity_ = {};
+    currentInteractionProfiles_[0] = XR_NULL_PATH;
+    currentInteractionProfiles_[1] = XR_NULL_PATH;
     pendingFrameControls_ = {};
     lastFrameControlsTime_ = {};
 }
@@ -363,6 +399,8 @@ void OpenXrInput::pollTrigger() {
     for (int hand = 0; hand < 2; ++hand) {
         bool sourceActive = false;
         bool down = false;
+        bool floatDown = false;
+        bool clickDown = false;
         float triggerValue = 0.f;
 
         if (triggerAction_ != XR_NULL_HANDLE) {
@@ -374,9 +412,10 @@ void OpenXrInput::pollTrigger() {
             if (result == XR_SUCCESS && state.isActive) {
                 sourceActive = true;
                 triggerValue = state.currentState;
-                down = triggerPressed_[hand]
+                floatDown = triggerPressed_[hand]
                     ? state.currentState > kTriggerReleaseThreshold
                     : state.currentState >= kTriggerPressThreshold;
+                down = floatDown;
             }
         }
 
@@ -388,7 +427,8 @@ void OpenXrInput::pollTrigger() {
             const XrResult result = xrGetActionStateBoolean(session_, &getInfo, &state);
             if (result == XR_SUCCESS && state.isActive) {
                 sourceActive = true;
-                down = down || state.currentState;
+                clickDown = state.currentState;
+                down = down || clickDown;
             }
         }
 
@@ -407,7 +447,14 @@ void OpenXrInput::pollTrigger() {
             triggerPressedAt_[hand] = now;
             lastTriggerTimelineSeekEmit_[hand] = {};
             lastPointerActivity_ = now;
-            XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_TRIGGER_DOWN hand=%d value=%.2f", hand, triggerValue);
+            XR_LOGI(
+                "DDDVR/OpenXRInput",
+                "XR_INPUT_TRIGGER_DOWN hand=%d value=%.2f float=%d click=%d",
+                hand,
+                triggerValue,
+                floatDown ? 1 : 0,
+                clickDown ? 1 : 0
+            );
         } else if (triggerPressed_[hand] && !down) {
             const bool consumedTimeline = triggerConsumedByTimeline_[hand];
             const bool consumedUi = triggerConsumedByUi_[hand];
@@ -474,6 +521,20 @@ void OpenXrInput::pollSqueeze() {
                 activeGrabHand_ = squeezePressed_[other] ? other : -1;
             }
             continue;
+        }
+
+        if (!down && squeezeValue > 0.03f) {
+            static uint32_t squeezeValueLogCount[2] = {0, 0};
+            squeezeValueLogCount[hand] += 1;
+            if (squeezeValueLogCount[hand] <= 8 || squeezeValueLogCount[hand] % 45 == 0) {
+                XR_LOGI(
+                    "DDDVR/OpenXRInput",
+                    "XR_INPUT_SQUEEZE_VALUE hand=%d value=%.2f threshold=%.2f",
+                    hand,
+                    squeezeValue,
+                    kSqueezePressThreshold
+                );
+            }
         }
 
         if (!squeezePressed_[hand] && down) {
@@ -576,8 +637,15 @@ void OpenXrInput::pollThumbstick() {
                 static uint32_t grabStickLogCount = 0;
                 grabStickLogCount += 1;
                 if (grabStickLogCount <= 12 || grabStickLogCount % 45 == 0) {
-                    XR_LOGI("DDDVR/OpenXRInput", "XR_INPUT_GRAB_STICK hand=%d activeGrab=%d x=%.2f y=%.2f dt=%.3f",
-                            hand, activeGrabHand(), x, y, deltaSeconds);
+                    XR_LOGI(
+                        "DDDVR/OpenXRInput",
+                        "XR_INPUT_GRAB_STICK hand=%d activeGrab=%d x=%.2f y=%.2f dt=%.3f",
+                        hand,
+                        activeGrabHand(),
+                        x,
+                        y,
+                        deltaSeconds
+                    );
                 }
             }
 

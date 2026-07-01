@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
+import androidx.media3.common.Player
 import top.rootu.dddvr.player.PlayerManager
 
 class PlaybackSession(
@@ -60,6 +61,18 @@ class PlaybackSession(
         get() {
             if (!isMainThread()) return 0L
             return playerManager.exoPlayer?.bufferedPosition ?: 0L
+        }
+
+    val playbackSpeed: Float
+        get() {
+            if (!isMainThread()) return 1f
+            return playerManager.exoPlayer?.playbackParameters?.speed ?: 1f
+        }
+
+    val isBuffering: Boolean
+        get() {
+            if (!isMainThread()) return false
+            return playerManager.exoPlayer?.playbackState == Player.STATE_BUFFERING
         }
 
     val wantsToPlay: Boolean
@@ -123,7 +136,9 @@ class PlaybackSession(
 
     fun play() {
         runOnPlayerThread {
-            playerManager.exoPlayer?.playWhenReady = true
+            val player = playerManager.exoPlayer ?: return@runOnPlayerThread
+            player.playWhenReady = true
+            player.play()
             lastKnownWantsToPlay = true
             lastKnownIsPlaying = true
         }
@@ -131,10 +146,12 @@ class PlaybackSession(
 
     fun pause() {
         runOnPlayerThread {
-            playerManager.exoPlayer?.playWhenReady = false
+            val player = playerManager.exoPlayer
+            player?.playWhenReady = false
+            player?.pause()
             lastKnownWantsToPlay = false
             lastKnownIsPlaying = false
-            lastKnownPositionMs = playerManager.exoPlayer?.currentPosition ?: lastKnownPositionMs
+            lastKnownPositionMs = player?.currentPosition ?: lastKnownPositionMs
         }
     }
 
@@ -146,9 +163,19 @@ class PlaybackSession(
         }
     }
 
+    fun seekBy(deltaMs: Long) {
+        seekTo(currentPositionMs + deltaMs)
+    }
+
     fun setMuted(muted: Boolean) {
         runOnPlayerThread {
             playerManager.exoPlayer?.volume = if (muted) 0f else 1f
+        }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        runOnPlayerThread {
+            playerManager.exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.25f, 3.0f))
         }
     }
 
