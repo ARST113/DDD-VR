@@ -60,6 +60,9 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import androidx.media3.common.MediaItem as Media3MediaItem
 
+private const val MAX_UHD_VIDEO_WIDTH = 4096
+private const val MAX_UHD_VIDEO_HEIGHT = 2304
+
 class PlayerManager(
     private val context: Context,
     listener: Player.Listener
@@ -237,6 +240,14 @@ class PlayerManager(
         val parametersBuilder = trackSelector.buildUponParameters()
             .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
             .setTunnelingEnabled(settingsRepo.isTunnelingEnabled())
+            .setMaxVideoSize(MAX_UHD_VIDEO_WIDTH, MAX_UHD_VIDEO_HEIGHT)
+            .setMaxVideoBitrate(Int.MAX_VALUE)
+            .setViewportSize(MAX_UHD_VIDEO_WIDTH, MAX_UHD_VIDEO_HEIGHT, true)
+            .setExceedVideoConstraintsIfNecessary(true)
+            .setForceHighestSupportedBitrate(true)
+            .setAllowVideoMixedMimeTypeAdaptiveness(true)
+            .setAllowVideoNonSeamlessAdaptiveness(true)
+            .setAllowVideoMixedDecoderSupportAdaptiveness(true)
             // Разрешаем плееру игнорировать битые дорожки
             .setExceedRendererCapabilitiesIfNecessary(true)
             .setAllowMultipleAdaptiveSelections(true)

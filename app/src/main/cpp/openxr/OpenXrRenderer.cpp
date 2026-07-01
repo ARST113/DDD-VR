@@ -1422,6 +1422,10 @@ CinemaUvRect OpenXrRenderer::uvRectForEye(int eye) const {
             return actualEye == 0 ? CinemaUvRect{0.f, 0.f, 1.f, 0.5f} : CinemaUvRect{0.f, 0.5f, 1.f, 0.5f};
         case OpenXrStereoMode::OuReversed:
             return actualEye == 0 ? CinemaUvRect{0.f, 0.5f, 1.f, 0.5f} : CinemaUvRect{0.f, 0.f, 1.f, 0.5f};
+        case OpenXrStereoMode::VrCamV1:
+            return actualEye == 1 ? CinemaUvRect{0.0001f, 0.f, 0.5f, 1.f} : CinemaUvRect{0.5f, 0.f, 0.5f, 1.f};
+        case OpenXrStereoMode::VrCamV2:
+            return actualEye == 0 ? CinemaUvRect{0.0001f, 0.f, 0.5f, 1.f} : CinemaUvRect{0.5f, 0.f, 0.5f, 1.f};
         case OpenXrStereoMode::Mono:
         default:
             return CinemaUvRect{};

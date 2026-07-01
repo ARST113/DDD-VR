@@ -2,6 +2,7 @@ package top.rootu.dddvr.xr.activity
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +20,7 @@ import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.logic.TrackLogic
 import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.player.PlayerManager
+import top.rootu.dddvr.utils.MediaFormatHelper
 import top.rootu.dddvr.viewmodel.TrackOption
 import top.rootu.dddvr.vr.activity.VrIntentParser
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
@@ -105,10 +107,22 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         }
     }
 
+    private fun configureWakeForOpenXrLaunch() {
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setTurnScreenOn(true)
+            setShowWhenLocked(true)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "ACTIVITY_ON_CREATE_BEGIN")
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        configureWakeForOpenXrLaunch()
 
         val parsedRequest = VrIntentParser.parse(intent)
         val request = parsedRequest ?: restoreLastPlaybackRequest()
@@ -568,7 +582,12 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         val width = format.width
         val height = format.height
         if (width <= 0 || height <= 0) return
-        Log.i(TAG, "XR_VIDEO_FORMAT width=$width height=$height sampleMime=${format.sampleMimeType}")
+        val hdr = MediaFormatHelper.getHdrInfo(format).ifBlank { "SDR" }
+        val codec = MediaFormatHelper.getShortVideoCodecName(format).ifBlank { format.sampleMimeType.orEmpty() }
+        Log.i(
+            TAG,
+            "XR_VIDEO_FORMAT width=$width height=$height codec=$codec hdr=$hdr sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate}"
+        )
         bridge.setVideoSize(width, height)
     }
 
@@ -706,6 +725,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             StereoInputMode.SBS_REVERSED -> "SBS-R"
             StereoInputMode.OU -> "OU"
             StereoInputMode.OU_REVERSED -> "OU-R"
+            StereoInputMode.VR_CAM_V1 -> "VRCAM1"
+            StereoInputMode.VR_CAM_V2 -> "VRCAM2"
             else -> "2D"
         }
         return when (playbackConfig.screenMode) {

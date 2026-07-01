@@ -42,7 +42,9 @@ class VrPlayerController(
             StereoInputMode.SBS -> StereoInputMode.SBS_REVERSED
             StereoInputMode.SBS_REVERSED -> StereoInputMode.OU
             StereoInputMode.OU -> StereoInputMode.OU_REVERSED
-            StereoInputMode.OU_REVERSED -> StereoInputMode.MONO
+            StereoInputMode.OU_REVERSED -> StereoInputMode.VR_CAM_V1
+            StereoInputMode.VR_CAM_V1 -> StereoInputMode.VR_CAM_V2
+            StereoInputMode.VR_CAM_V2 -> StereoInputMode.MONO
             else -> StereoInputMode.MONO
         }
         setStereoMode(next)

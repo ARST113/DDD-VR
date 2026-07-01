@@ -9,7 +9,7 @@ bool OpenXrSwapchain::create(XrSession session, int32_t w, int32_t h) {
     std::vector<int64_t> formats(fmtCount);
     xrEnumerateSwapchainFormats(session, fmtCount, &fmtCount, formats.data());
     XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrEnumerateSwapchainFormats count=%u", fmtCount);
-    int64_t chosen = 0; std::vector<int64_t> pref = {GL_SRGB8_ALPHA8, GL_RGBA8, 0x8058};
+    int64_t chosen = 0; std::vector<int64_t> pref = {GL_RGBA16F, GL_RGB10_A2, GL_SRGB8_ALPHA8, GL_RGBA8, 0x8058};
     for (auto p : pref) { for (auto f : formats) { if (f == p) { chosen = p; break; } } if (chosen != 0) break; }
     XR_LOGI("DDDVR/OpenXRSession", "xrEnumerateSwapchainFormats count=%u chosen=%lld", fmtCount, (long long)chosen);
     if (chosen == 0) { XR_LOGE("DDDVR/OpenXRCheck", "SWAPCHAIN_FAIL result=NO_FORMAT"); return false; }

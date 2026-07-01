@@ -234,6 +234,8 @@ OpenXrStereoMode parseStereoMode(const std::string& name) {
     if (name == "SBS_REVERSED") return OpenXrStereoMode::SbsReversed;
     if (name == "OU") return OpenXrStereoMode::Ou;
     if (name == "OU_REVERSED") return OpenXrStereoMode::OuReversed;
+    if (name == "VR_CAM_V1") return OpenXrStereoMode::VrCamV1;
+    if (name == "VR_CAM_V2") return OpenXrStereoMode::VrCamV2;
     return OpenXrStereoMode::Mono;
 }
 

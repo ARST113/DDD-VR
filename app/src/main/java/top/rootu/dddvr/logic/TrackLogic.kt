@@ -8,6 +8,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
 import top.rootu.dddvr.R
 import top.rootu.dddvr.utils.LocaleUtils
+import top.rootu.dddvr.utils.MediaFormatHelper
 import top.rootu.dddvr.viewmodel.TrackOption
 import top.rootu.dddvr.viewmodel.VideoQualityOption
 
@@ -22,7 +23,7 @@ object TrackLogic {
                     if (format.width > 0 && format.height > 0) {
                         options.add(
                             VideoQualityOption(
-                                "${format.height}p",
+                                buildVideoTrackLabel(format),
                                 format.width,
                                 format.height,
                                 format.bitrate,
@@ -39,6 +40,17 @@ object TrackLogic {
         return sortedOptions
     }
 
+    private fun buildVideoTrackLabel(format: Format): String {
+        val resolution = "${format.height}p"
+        val hdr = MediaFormatHelper.getHdrInfo(format).takeIf { it.isNotBlank() }
+        val codec = MediaFormatHelper.getShortVideoCodecName(format).takeIf { it.isNotBlank() }
+        val bitrate = if (format.bitrate != Format.NO_VALUE && format.bitrate > 0) {
+            "${format.bitrate / 1_000_000} Mbps"
+        } else {
+            null
+        }
+        return listOfNotNull(resolution, hdr, codec, bitrate).joinToString(" ")
+    }
     fun extractAudioTracks(
         tracks: Tracks,
         metadata: Map<Int, UnifiedMetadataReader.TrackInfo>

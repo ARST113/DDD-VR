@@ -18,7 +18,9 @@ enum class OpenXrStereoMode {
     Sbs,
     SbsReversed,
     Ou,
-    OuReversed
+    OuReversed,
+    VrCamV1,
+    VrCamV2
 };
 
 enum class OpenXrScreenModeNative {

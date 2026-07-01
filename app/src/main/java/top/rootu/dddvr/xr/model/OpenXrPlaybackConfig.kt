@@ -18,8 +18,8 @@ data class OpenXrPlaybackConfig(
         fun from(request: VrPlaybackRequest): OpenXrPlaybackConfig {
             val effectiveStereo = when {
                 request.hasStereoLayoutExtra && request.vrConfig.stereoLayout == StereoLayout.MONO -> StereoInputMode.MONO
-                request.vrConfig.stereoLayout == StereoLayout.SBS -> StereoInputMode.SBS
-                request.vrConfig.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
+                request.hasStereoLayoutExtra && request.vrConfig.stereoLayout == StereoLayout.SBS -> StereoInputMode.SBS
+                request.hasStereoLayoutExtra && request.vrConfig.stereoLayout == StereoLayout.OU -> StereoInputMode.OU
                 else -> request.stereoInputMode
             }
             val mode = when (request.vrConfig.projectionMode) {
