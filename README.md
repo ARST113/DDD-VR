@@ -1,5 +1,7 @@
 # DDD-VR
 
+> Подробное описание реализации HDR10, HLG и Dolby Vision: [docs/HDR_MODE.md](docs/HDR_MODE.md)
+
 **DDD-VR** — Android/OpenXR видеоплеер для запуска видео в VR-режиме.
 
 Проект построен вокруг OpenXR-активити, Media3/ExoPlayer и native OpenXR-рендера. Основной сценарий — открыть видео из внешнего приложения, лаунчера, Lampa/DDDPlayer2-интеграции или через `adb`, передав ссылку на видео через Android Intent.

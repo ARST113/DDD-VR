@@ -1,5 +1,8 @@
 # DDD-VR FFmpeg Video Backend
 
+HDR pipeline, Dolby Vision RPU processing and Pico runtime diagnostics are
+documented in [`docs/HDR_MODE.md`](../../../../docs/HDR_MODE.md).
+
 This folder is the native FFmpeg video backend input.
 
 Expected layout:
@@ -22,4 +25,3 @@ app/src/main/ffmpeg/arm64-v8a/libswresample.so
 When all headers and libraries are present, CMake defines
 `DDDVR_HAS_FFMPEG_VIDEO=1`. Without them the app still builds, logs
 `FFMPEG_VIDEO_NOT_LINKED`, and falls back to the existing ExoPlayer/OES path.
-
