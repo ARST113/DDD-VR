@@ -10,6 +10,8 @@ import top.rootu.dddvr.xr.input.OpenXrInputMapper
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
 import top.rootu.dddvr.xr.ui.OpenXrPlayerUiAction
 import top.rootu.dddvr.xr.ui.OpenXrPlayerUiState
+import top.rootu.dddvr.xr.ui.OpenXrFfmpegPlaybackState
+import top.rootu.dddvr.xr.ui.OpenXrTrackRow
 
 class OpenXrBridge(
     private val activity: Activity,
@@ -84,6 +86,52 @@ class OpenXrBridge(
         nativeSetPlayerUiState(nativeHandle, state)
     }
 
+    fun startFfmpegVideoSource(uri: String, startPositionMs: Long) {
+        if (nativeHandle == 0L || uri.isBlank()) return
+        nativeStartFfmpegVideoSource(nativeHandle, uri, startPositionMs.coerceAtLeast(0L))
+    }
+
+    fun stopFfmpegVideoSource() {
+        if (nativeHandle == 0L) return
+        nativeStopFfmpegVideoSource(nativeHandle)
+    }
+
+    fun setFfmpegPlaybackState(playing: Boolean, positionMs: Long, forceSeek: Boolean = false) {
+        if (nativeHandle == 0L) return
+        nativeSetFfmpegPlaybackState(nativeHandle, playing, positionMs.coerceAtLeast(0L), forceSeek)
+    }
+
+    fun getFfmpegPlaybackState(): OpenXrFfmpegPlaybackState {
+        if (nativeHandle == 0L) return OpenXrFfmpegPlaybackState()
+        return OpenXrFfmpegPlaybackState.fromNative(nativeGetFfmpegPlaybackState(nativeHandle))
+    }
+
+    fun getFfmpegAudioTracks(): List<OpenXrTrackRow> {
+        if (nativeHandle == 0L) return emptyList()
+        val ids = nativeGetFfmpegAudioTrackIds(nativeHandle)
+        val titles = nativeGetFfmpegAudioTrackTitles(nativeHandle)
+        val subtitles = nativeGetFfmpegAudioTrackSubtitles(nativeHandle)
+        val selectedStream = getFfmpegPlaybackState().selectedAudioStream
+        return ids.indices.map { index ->
+            OpenXrTrackRow(
+                id = ids[index],
+                title = titles.getOrNull(index).orEmpty(),
+                subtitle = subtitles.getOrNull(index).orEmpty(),
+                selected = ids[index] == "ffmpeg_audio:$selectedStream",
+                enabled = true
+            )
+        }
+    }
+
+    fun selectFfmpegAudioTrack(trackId: String): Boolean {
+        if (nativeHandle == 0L || trackId.isBlank()) return false
+        return nativeSelectFfmpegAudioTrack(nativeHandle, trackId)
+    }
+
+    fun setFfmpegMuted(muted: Boolean) {
+        if (nativeHandle != 0L) nativeSetFfmpegMuted(nativeHandle, muted)
+    }
+
     fun destroy() {
         if (nativeHandle == 0L) return
         nativeDestroy(nativeHandle)
@@ -128,6 +176,10 @@ class OpenXrBridge(
         floatValue: Float,
         stringValue: String?
     ) {
+        Log.i(
+            "DDDVR/OpenXR",
+            "XR_PLAYER_UI_ACTION_RECEIVED type=$actionType int=$intValue float=$floatValue text=${stringValue.orEmpty()}"
+        )
         val action = OpenXrPlayerUiAction.fromNative(actionType, intValue, floatValue, stringValue)
         mainHandler.post { callbacks.onPlayerUiAction(action) }
     }
@@ -169,6 +221,20 @@ class OpenXrBridge(
         selectedAudioTrackIndex: Int
     )
     private external fun nativeSetPlayerUiState(handle: Long, state: OpenXrPlayerUiState)
+    private external fun nativeStartFfmpegVideoSource(handle: Long, uri: String, startPositionMs: Long)
+    private external fun nativeStopFfmpegVideoSource(handle: Long)
+    private external fun nativeSetFfmpegPlaybackState(
+        handle: Long,
+        playing: Boolean,
+        positionMs: Long,
+        forceSeek: Boolean
+    )
+    private external fun nativeGetFfmpegPlaybackState(handle: Long): LongArray
+    private external fun nativeGetFfmpegAudioTrackIds(handle: Long): Array<String>
+    private external fun nativeGetFfmpegAudioTrackTitles(handle: Long): Array<String>
+    private external fun nativeGetFfmpegAudioTrackSubtitles(handle: Long): Array<String>
+    private external fun nativeSelectFfmpegAudioTrack(handle: Long, trackId: String): Boolean
+    private external fun nativeSetFfmpegMuted(handle: Long, muted: Boolean)
     private external fun nativeDestroy(handle: Long)
 
     companion object {

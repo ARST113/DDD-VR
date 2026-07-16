@@ -1,4 +1,5 @@
 #include "OpenXrRenderer.h"
+#include "../video/AndroidImageApi.h"
 #include "../ui/VrPlayerTheme.h"
 #include "../util/XrLog.h"
 #include <algorithm>
@@ -43,6 +44,7 @@ constexpr float kUiPanelMaxOffsetXMeters = 0.65f;
 constexpr float kUiPanelMaxOffsetYMeters = 0.42f;
 constexpr float kUiPanelDragStartThresholdMeters = 0.018f;
 constexpr bool kDetachedUiPanelDragEnabled = false;
+constexpr float kAudioModalWidthPixels = 880.0f;
 
 std::array<float, 16> multiply(const std::array<float, 16>& a, const std::array<float, 16>& b) {
     std::array<float, 16> out{};
@@ -150,6 +152,59 @@ bool insideRect(float x, float y, float minX, float minY, float maxX, float maxY
         y <= maxY + padding;
 }
 
+float interactiveModalWidthPixels() {
+    return std::max(VrPlayerTheme::ModalWidth, kAudioModalWidthPixels);
+}
+
+bool isPlayerUiModalClosePixelForWidth(float x, float y, float modalWidth) {
+    const float canvasX = static_cast<float>(kImGuiUiTextureWidth);
+    const float canvasY = static_cast<float>(kImGuiUiTextureHeight);
+    const float centerX = canvasX * 0.5f;
+    const float barTop = canvasY - VrPlayerTheme::MainBarHeight - 34.f;
+    const float modalGap = 18.f;
+    const float modalTopMargin = 18.f;
+    const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
+    const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
+    const float modalMaxX = centerX + modalWidth * 0.5f;
+    const float modalMinY = barTop - modalGap - modalHeight;
+    return insideRect(
+        x,
+        y,
+        modalMaxX - 118.f,
+        modalMinY - 6.f,
+        modalMaxX + 26.f,
+        modalMinY + 104.f,
+        0.f
+    );
+}
+
+bool isPlayerUiModalClosePixel(float x, float y, bool modalOpen) {
+    if (!modalOpen) return false;
+    const bool expectedCloseRect =
+        isPlayerUiModalClosePixelForWidth(x, y, VrPlayerTheme::ModalWidth) ||
+        isPlayerUiModalClosePixelForWidth(x, y, kAudioModalWidthPixels);
+    if (expectedCloseRect) return true;
+
+    const float canvasX = static_cast<float>(kImGuiUiTextureWidth);
+    const float canvasY = static_cast<float>(kImGuiUiTextureHeight);
+    const float centerX = canvasX * 0.5f;
+    const float barTop = canvasY - VrPlayerTheme::MainBarHeight - 34.f;
+    const float modalGap = 18.f;
+    const float modalTopMargin = 18.f;
+    const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
+    const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
+    const float modalMinY = barTop - modalGap - modalHeight;
+    return insideRect(
+        x,
+        y,
+        centerX + 58.f,
+        modalMinY - 18.f,
+        centerX + 335.f,
+        modalMinY + 72.f,
+        0.f
+    );
+}
+
 VrRayHit hitUiPlaneUnbounded(
     const XrPosef& aimPose,
     const VrUiPlane& plane,
@@ -252,8 +307,9 @@ bool isPlayerUiPixelInteractive(float x, float y, bool modalOpen) {
         const float modalTopMargin = 18.f;
         const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
         const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
-        const float modalMinX = centerX - VrPlayerTheme::ModalWidth * 0.5f;
-        const float modalMaxX = centerX + VrPlayerTheme::ModalWidth * 0.5f;
+        const float modalWidth = interactiveModalWidthPixels();
+        const float modalMinX = centerX - modalWidth * 0.5f;
+        const float modalMaxX = centerX + modalWidth * 0.5f;
         const float modalMinY = barTop - modalGap - modalHeight;
         const float modalMaxY = barTop - modalGap;
         if (insideRect(x, y, modalMinX, modalMinY, modalMaxX, modalMaxY, 10.f)) {
@@ -311,8 +367,12 @@ bool isPlayerUiDragHandlePixel(float x, float y, bool modalOpen) {
         const float modalTopMargin = 18.f;
         const float availableModalHeight = std::max(220.f, barTop - modalGap - modalTopMargin);
         const float modalHeight = std::min(VrPlayerTheme::ModalMaxHeight, availableModalHeight);
-        const float modalMinX = centerX - VrPlayerTheme::ModalWidth * 0.5f;
-        const float modalMaxX = centerX + VrPlayerTheme::ModalWidth * 0.5f;
+        if (isPlayerUiModalClosePixel(x, y, modalOpen)) {
+            return false;
+        }
+        const float modalWidth = interactiveModalWidthPixels();
+        const float modalMinX = centerX - modalWidth * 0.5f;
+        const float modalMaxX = centerX + modalWidth * 0.5f;
         const float modalMinY = barTop - modalGap - modalHeight;
         const float modalMaxY = barTop - modalGap;
         if (insideRect(x, y, modalMinX, modalMinY, modalMaxX, modalMaxY, 10.f)) {
@@ -359,6 +419,67 @@ void OpenXrRenderer::setVideoFrameState(const float* transformMatrix, bool hasVi
     hasVideoFrame_ = hasVideoFrame_ || hasVideo;
 }
 
+bool OpenXrRenderer::uploadFfmpegVideoFrame(const FfmpegVideoFrame& frame) {
+    if (!ffmpegVideoEnabled_) return false;
+    const bool uploaded = ffmpegVideo_.upload(frame);
+    if (uploaded) {
+        if (!ffmpegVideoFrameSeen_) {
+            XR_LOGI(
+                "DDDVR/FFmpegVideo",
+                "FFMPEG_VIDEO_FIRST_FRAME width=%d height=%d fmt=%d transfer=%d primaries=%d range=%d",
+                frame.width,
+                frame.height,
+                static_cast<int>(frame.pixelFormat),
+                static_cast<int>(frame.transfer),
+                static_cast<int>(frame.primaries),
+                static_cast<int>(frame.range)
+            );
+        }
+        ffmpegVideoFrameSeen_ = true;
+    }
+    return uploaded;
+}
+
+bool OpenXrRenderer::importFfmpegHardwareBufferFrame(
+    FfmpegHardwareBufferFrame&& frame
+) {
+    if (!ffmpegVideoEnabled_) {
+        if (frame.image != nullptr) dddvr::androidimage::imageDelete(frame.image);
+        return false;
+    }
+    const int width = frame.width;
+    const int height = frame.height;
+    const auto transfer = frame.transfer;
+    const auto primaries = frame.primaries;
+    const auto range = frame.range;
+    const bool imported = ffmpegVideo_.importHardwareBuffer(std::move(frame));
+    if (imported) {
+        if (!ffmpegVideoFrameSeen_) {
+            XR_LOGI(
+                "DDDVR/FFmpegVideo",
+                "FFMPEG_VIDEO_FIRST_AHB_FRAME width=%d height=%d transfer=%d primaries=%d range=%d",
+                width,
+                height,
+                static_cast<int>(transfer),
+                static_cast<int>(primaries),
+                static_cast<int>(range)
+            );
+        }
+        ffmpegVideoFrameSeen_ = true;
+    }
+    return imported;
+}
+
+void OpenXrRenderer::setFfmpegVideoEnabled(bool enabled) {
+    if (ffmpegVideoEnabled_ == enabled) return;
+    ffmpegVideoEnabled_ = enabled;
+    ffmpegVideoFrameSeen_ = false;
+    if (!enabled) {
+        ffmpegVideo_.destroy();
+    }
+    XR_LOGI("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_RENDER_PATH enabled=%d", enabled ? 1 : 0);
+}
+
 void OpenXrRenderer::setUiState(
     bool visible,
     bool playing,
@@ -396,6 +517,8 @@ void OpenXrRenderer::setUiState(
     state.audioTrackLabel = audioTrackLabel;
     state.audioTrackLabels = audioTrackLabels;
     state.selectedAudioTrackIndex = selectedAudioTrackIndex;
+    screen_.setColorControls(1.f, 1.f, 1.f, 1.f);
+    screen_.setHdrLookEnabled(false);
     for (size_t i = 0; i < audioTrackLabels.size(); ++i) {
         VrTrackRow row{};
         row.id = "legacy_audio:" + std::to_string(i);
@@ -412,6 +535,18 @@ void OpenXrRenderer::setPlayerUiState(const VrPlayerUiState& state) {
     uiVisible_.store(state.visible);
     uiPlaying_.store(state.playing);
     uiModalOpen_.store(state.activeModal != VrPlayerModal::None);
+    const float brightness = std::clamp(state.display.brightness, 0.45f, 1.45f);
+    screen_.setHdrLookEnabled(state.display.hdrVideo);
+    const bool dimmedProfile = state.display.enhanceVideo && brightness < 0.95f;
+    if (state.display.hdrVideo) {
+        screen_.setColorControls(brightness, 1.00f, 1.04f, 1.02f);
+    } else if (dimmedProfile) {
+        screen_.setColorControls(brightness, 1.02f, 1.09f, 1.10f);
+    } else if (state.display.enhanceVideo) {
+        screen_.setColorControls(brightness, 1.06f, 1.10f, 1.01f);
+    } else {
+        screen_.setColorControls(brightness, 1.f, 1.f, 1.f);
+    }
     const int progressPermille = state.durationMs > 0
         ? static_cast<int>((std::clamp<int64_t>(state.positionMs, 0, state.durationMs) * 1000) / state.durationMs)
         : 0;
@@ -492,6 +627,30 @@ void OpenXrRenderer::updateUiInteraction(
             uiRayHits_[hand] = {};
         }
         screenRayHits_[hand] = screenHitTest(rays[hand].pose, hand);
+    }
+
+    if (triggerPressed != nullptr) {
+        for (int hand = 0; hand < 2; ++hand) {
+            const bool closePressed =
+                triggerPressed[hand] &&
+                rawUiHits[hand].hit &&
+                isPlayerUiModalClosePixel(rawUiHits[hand].pixelX, rawUiHits[hand].pixelY, modalOpen);
+            if (closePressed && !uiClosePressed_[hand]) {
+                pendingUiExit_ = true;
+                uiAutoHideFrameBudget_ = kUiAutoHideFrames;
+                XR_LOGI(
+                    "DDDVR/OpenXRUi",
+                    "XR_UI_ACTION close_direct_exit hand=%d x=%.1f y=%.1f",
+                    hand,
+                    rawUiHits[hand].pixelX,
+                    rawUiHits[hand].pixelY
+                );
+            }
+            uiClosePressed_[hand] = closePressed;
+        }
+    } else {
+        uiClosePressed_[0] = false;
+        uiClosePressed_[1] = false;
     }
 
     int selectedHand = -1;
@@ -676,6 +835,11 @@ bool OpenXrRenderer::consumeUiInputAction(OpenXrInputActionCode* outAction) {
     if (pendingUiSeekForward_) {
         pendingUiSeekForward_ = false;
         *outAction = OpenXrInputActionCode::SeekForward;
+        return true;
+    }
+    if (pendingUiExit_) {
+        pendingUiExit_ = false;
+        *outAction = OpenXrInputActionCode::Exit;
         return true;
     }
     return false;
@@ -1290,6 +1454,10 @@ void OpenXrRenderer::queuePlayerPanelActions() {
         pendingUiSeekForward_ = true;
         XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION seek_forward");
     }
+    if (playerPanel_.consumeExitRequested()) {
+        pendingUiExit_ = true;
+        XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION exit");
+    }
     int progressPermille = 0;
     if (playerPanel_.consumeTimelineSeekRequested(&progressPermille)) {
         if (progressPermille < 0) progressPermille = 0;
@@ -1345,8 +1513,37 @@ void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& vie
     const auto projection = projectionFromFov(view.fov);
     const auto viewMatrix = viewFromPose(view.pose);
     const auto mvp = multiply(projection, viewMatrix);
-    if (eye == 0) {
-        screen_.renderVideo(video_.id(), mvp.data(), videoTransform_, uvRectForEye(eye), hasVideoFrame_, 0.f, 0.f, 0.f);
+    if (ffmpegVideoEnabled_ && ffmpegVideo_.hasFrame()) {
+        const auto& ffmpegTextures = ffmpegVideo_.textureSet();
+        if (ffmpegTextures.external && ffmpegTextures.externalTexture != 0) {
+            static constexpr float kHardwareBufferTextureMatrix[16] = {
+                1.f, 0.f, 0.f, 0.f,
+                0.f, -1.f, 0.f, 0.f,
+                0.f, 0.f, 1.f, 0.f,
+                0.f, 1.f, 0.f, 1.f
+            };
+            screen_.renderVideo(
+                ffmpegTextures.externalTexture,
+                mvp.data(),
+                kHardwareBufferTextureMatrix,
+                uvRectForEye(eye),
+                true,
+                0.f,
+                0.f,
+                0.f,
+                &ffmpegTextures
+            );
+        } else {
+            screen_.renderFfmpegVideo(
+                ffmpegTextures,
+                mvp.data(),
+                uvRectForEye(eye),
+                true,
+                0.f,
+                0.f,
+                0.f
+            );
+        }
     } else {
         screen_.renderVideo(video_.id(), mvp.data(), videoTransform_, uvRectForEye(eye), hasVideoFrame_, 0.f, 0.f, 0.f);
     }

@@ -65,6 +65,12 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDirs("src/main/jniLibs", "src/main/ffmpeg")
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         viewBinding = false

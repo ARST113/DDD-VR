@@ -63,7 +63,8 @@ data class TrackOption(
     val index: Int, // Порядковый номер (для генерации "Track 1")
     val group: Tracks.Group?,
     val trackIndex: Int,
-    val isOff: Boolean = false
+    val isOff: Boolean = false,
+    val groupIndex: Int = -1
 )
 
 data class VideoQualityOption(

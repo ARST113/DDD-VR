@@ -3,6 +3,7 @@
 #include "VrPlayerTheme.h"
 #include "../third/imgui/imgui.h"
 #include "../third/imgui/imgui_internal.h"
+#include "../util/XrLog.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,7 @@ enum class IconKind {
     Pause,
     Next,
     Environment,
+    Microphone,
     More,
     Close,
     Refresh
@@ -54,6 +56,10 @@ void drawClippedText(ImDrawList* draw, const ImRect& rect, const char* text, ImU
     draw->PushClipRect(rect.Min, rect.Max, true);
     draw->AddText(ImVec2(rect.Min.x, rect.Min.y + (rect.GetHeight() - ImGui::GetTextLineHeight()) * 0.5f), color, text);
     draw->PopClipRect();
+}
+
+void drawTextScaled(ImDrawList* draw, const ImVec2& pos, const char* text, ImU32 color, float scale) {
+    draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * scale, pos, color, text);
 }
 
 std::string speedLabel(float speed) {
@@ -136,6 +142,15 @@ void drawIcon(ImDrawList* draw, const ImRect& rect, IconKind kind, ImU32 color) 
                 stroke
             );
             break;
+        case IconKind::Microphone:
+            draw->AddRectFilled(ImVec2(cx - r * 0.48f, cy - r * 1.18f), ImVec2(cx + r * 0.48f, cy + r * 0.2f), color, r * 0.48f);
+            draw->AddLine(ImVec2(cx - r * 0.95f, cy - r * 0.12f), ImVec2(cx - r * 0.95f, cy + r * 0.25f), color, stroke);
+            draw->AddLine(ImVec2(cx + r * 0.95f, cy - r * 0.12f), ImVec2(cx + r * 0.95f, cy + r * 0.25f), color, stroke);
+            draw->PathArcTo(ImVec2(cx, cy + r * 0.18f), r * 0.95f, 0.0f, 3.14159f, 18);
+            draw->PathStroke(color, 0, stroke);
+            draw->AddLine(ImVec2(cx, cy + r * 0.48f), ImVec2(cx, cy + r * 1.1f), color, stroke);
+            draw->AddLine(ImVec2(cx - r * 0.62f, cy + r * 1.1f), ImVec2(cx + r * 0.62f, cy + r * 1.1f), color, stroke);
+            break;
         case IconKind::More:
             for (int i = 0; i < 3; ++i) {
                 draw->AddCircleFilled(ImVec2(cx - r + i * r, cy), stroke * 0.8f, color);
@@ -180,7 +195,7 @@ void VrPlayerPanel::draw() {
         ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoScrollWithMouse;
     ImGui::Begin("DDDVR_VR_PLAYER_PANEL", nullptr, flags);
-    ImGui::SetWindowFontScale(1.04f);
+    ImGui::SetWindowFontScale(1.10f);
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const float centerX = canvas.x * 0.5f;
@@ -282,9 +297,27 @@ void VrPlayerPanel::draw() {
             VrPlayerTheme::TextPrimary,
             title
         );
-        const ImRect closeRect(ImVec2(modal.Max.x - 54.f, modal.Min.y + 16.f), ImVec2(modal.Max.x - 18.f, modal.Min.y + 52.f));
-        if (drawSmallIconButton(playlistModal ? "DDDVR_PLAYLIST_CLOSE" : "DDDVR_SETTINGS_CLOSE", closeRect, IconKind::Close, "Закрыть")) {
-            pushAction(playlistModal ? VrPlayerPanelActionType::TogglePlaylist : VrPlayerPanelActionType::ToggleSettings);
+        const ImRect closeHitRect(ImVec2(modal.Max.x - 66.f, modal.Min.y + 6.f), ImVec2(modal.Max.x - 10.f, modal.Min.y + 62.f));
+        const ImRect closeRect(ImVec2(modal.Max.x - 58.f, modal.Min.y + 12.f), ImVec2(modal.Max.x - 18.f, modal.Min.y + 52.f));
+        ImGui::SetCursorScreenPos(closeHitRect.Min);
+        const bool closeClicked = ImGui::InvisibleButton(
+            playlistModal ? "DDDVR_PLAYLIST_CLOSE" : "DDDVR_SETTINGS_CLOSE",
+            closeHitRect.GetSize()
+        );
+        const bool closeHovered = ImGui::IsItemHovered();
+        const bool closeActive = ImGui::IsItemActive();
+        draw->AddRectFilled(
+            closeRect.Min,
+            closeRect.Max,
+            closeActive ? IM_COL32(98, 139, 215, 220) : (closeHovered ? IM_COL32(82, 100, 132, 190) : IM_COL32(0, 0, 0, 116)),
+            12.f
+        );
+        draw->AddRect(closeRect.Min, closeRect.Max, IM_COL32(255, 255, 255, 42), 12.f, 0, 1.f);
+        const ImRect closeIcon(ImVec2(closeRect.Min.x + 12.f, closeRect.Min.y + 12.f), ImVec2(closeRect.Max.x - 12.f, closeRect.Max.y - 12.f));
+        drawIcon(draw, closeIcon, IconKind::Close, closeHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(245, 248, 255, 242));
+        if (closeClicked) {
+            exitRequested_ = true;
+            XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION modal_close_exit");
         }
     };
 
@@ -334,8 +367,8 @@ void VrPlayerPanel::draw() {
             draw->AddText(ImVec2(content.Min.x + 16.f, content.Min.y + 18.f), VrPlayerTheme::TextMuted, audioRows ? "Нет аудиодорожек" : "Нет субтитров");
             return;
         }
-        const float rowHeight = 48.f;
-        const float gap = 6.f;
+        const float rowHeight = audioRows ? 52.f : 54.f;
+        const float gap = audioRows ? 7.f : 6.f;
         const int visibleRows = std::min<int>(
             static_cast<int>(rows.size()),
             std::max(0, static_cast<int>((content.GetHeight() + gap) / (rowHeight + gap)))
@@ -348,22 +381,71 @@ void VrPlayerPanel::draw() {
             );
             ImGui::PushID(audioRows ? 4000 + i : 5000 + i);
             const bool clicked = drawRowBase(rowRect, row.selected, row.enabled, audioRows ? "DDDVR_AUDIO_ROW" : "DDDVR_SUB_ROW");
-            const ImRect textRect(ImVec2(rowRect.Min.x + 18.f, rowRect.Min.y + 3.f), ImVec2(rowRect.Max.x - 46.f, rowRect.Max.y - 3.f));
+            if (audioRows) {
+                const ImRect iconRect(
+                    ImVec2(rowRect.Min.x + 16.f, rowRect.Min.y + 9.f),
+                    ImVec2(rowRect.Min.x + 50.f, rowRect.Min.y + 43.f)
+                );
+                draw->AddCircleFilled(iconRect.GetCenter(), 17.f, row.selected ? IM_COL32(74, 116, 205, 198) : IM_COL32(255, 255, 255, 24));
+                drawIcon(draw, iconRect, IconKind::Microphone, row.enabled ? IM_COL32(255, 255, 255, 244) : VrPlayerTheme::TextMuted);
+            }
+            const float textStartX = audioRows ? rowRect.Min.x + 62.f : rowRect.Min.x + 18.f;
+            const ImRect textRect(ImVec2(textStartX, rowRect.Min.y + 5.f), ImVec2(rowRect.Max.x - 62.f, rowRect.Max.y - 4.f));
+            const std::string singleLineTitle =
+                audioRows && !row.subtitle.empty() ? row.title + " - " + row.subtitle : row.title;
+            const char* titleText = singleLineTitle.c_str();
+            const float titleScale = audioRows ? 1.05f : 1.0f;
+            const float titleFontSize = ImGui::GetFontSize() * titleScale;
+            const ImVec2 titleSize = ImGui::GetFont()->CalcTextSizeA(titleFontSize, 100000.f, 0.0f, titleText);
+            const bool textOverflow = titleSize.x > textRect.GetWidth() || titleSize.y > textRect.GetHeight();
+            if (textOverflow) {
+                draw->AddRect(rowRect.Min, rowRect.Max, IM_COL32(255, 44, 44, 230), 10.f, 0, 2.0f);
+                static std::string lastOverflowKey;
+                const std::string overflowKey = row.id + ":" + singleLineTitle;
+                if (overflowKey != lastOverflowKey) {
+                    XR_LOGW(
+                        "DDDVR/OpenXRUi",
+                        "XR_AUDIO_ROW_TEXT_OVERFLOW id=%s textWidth=%.1f rectWidth=%.1f text=%s",
+                        row.id.c_str(),
+                        titleSize.x,
+                        textRect.GetWidth(),
+                        titleText
+                    );
+                    lastOverflowKey = overflowKey;
+                }
+            }
             draw->PushClipRect(textRect.Min, textRect.Max, true);
-            draw->AddText(ImVec2(textRect.Min.x, rowRect.Min.y + 8.f), row.enabled ? VrPlayerTheme::TextPrimary : VrPlayerTheme::TextMuted, row.title.c_str());
-            if (!row.subtitle.empty()) {
-                draw->AddText(ImVec2(textRect.Min.x, rowRect.Min.y + 28.f), VrPlayerTheme::TextMuted, row.subtitle.c_str());
+            drawTextScaled(
+                draw,
+                ImVec2(textRect.Min.x, rowRect.Min.y + (audioRows ? 15.f : 9.f)),
+                titleText,
+                row.enabled ? VrPlayerTheme::TextPrimary : VrPlayerTheme::TextMuted,
+                titleScale
+            );
+            if (!audioRows && !row.subtitle.empty()) {
+                drawTextScaled(
+                    draw,
+                    ImVec2(textRect.Min.x, rowRect.Min.y + 31.f),
+                    row.subtitle.c_str(),
+                    VrPlayerTheme::TextMuted,
+                    0.84f
+                );
             }
             draw->PopClipRect();
             if (row.selected) {
-                draw->AddText(ImVec2(rowRect.Max.x - 31.f, rowRect.Min.y + 15.f), VrPlayerTheme::AccentBlue, "✓");
+                const ImVec2 checkCenter(rowRect.Max.x - 34.f, rowRect.GetCenter().y);
+                draw->AddCircleFilled(checkCenter, 15.f, IM_COL32(74, 116, 205, 230));
+                draw->AddLine(ImVec2(checkCenter.x - 7.f, checkCenter.y), ImVec2(checkCenter.x - 2.f, checkCenter.y + 6.f), IM_COL32(255, 255, 255, 255), 2.7f);
+                draw->AddLine(ImVec2(checkCenter.x - 2.f, checkCenter.y + 6.f), ImVec2(checkCenter.x + 8.f, checkCenter.y - 7.f), IM_COL32(255, 255, 255, 255), 2.7f);
             }
             if (clicked && row.enabled) {
                 if (audioRows) {
                     if (row.id.rfind("legacy_audio:", 0) == 0) {
                         requestedAudioTrackIndex_ = std::atoi(row.id.c_str() + 13);
-                        audioTrackSelected_ = true;
+                    } else {
+                        requestedAudioTrackIndex_ = i + 1;
                     }
+                    audioTrackSelected_ = requestedAudioTrackIndex_ >= 0;
                     pushAction(VrPlayerPanelActionType::SelectAudioTrack, 0, 0.f, row.id);
                 } else {
                     pushAction(VrPlayerPanelActionType::SelectSubtitleTrack, 0, 0.f, row.id);
@@ -376,12 +458,14 @@ void VrPlayerPanel::draw() {
     if (modalOpen) {
         const float modalGap = 18.f;
         const float modalTopMargin = 18.f;
-        const float desiredModalHeight = state_.activeModal == VrPlayerModal::Playlist ? 292.f : 312.f;
+        const bool audioOnlyModal = state_.activeModal == VrPlayerModal::Settings && state_.activeSettingsTab == VrSettingsTab::Audio;
+        const float modalWidth = audioOnlyModal ? 880.f : VrPlayerTheme::ModalWidth;
+        const float desiredModalHeight = state_.activeModal == VrPlayerModal::Playlist ? 292.f : (audioOnlyModal ? 470.f : 312.f);
         const float availableModalHeight = std::max(220.f, bar.Min.y - modalGap - modalTopMargin);
         const float modalHeight = std::min(desiredModalHeight, availableModalHeight);
         const ImRect modal(
-            ImVec2(centerX - VrPlayerTheme::ModalWidth * 0.5f, bar.Min.y - modalGap - modalHeight),
-            ImVec2(centerX + VrPlayerTheme::ModalWidth * 0.5f, bar.Min.y - modalGap)
+            ImVec2(centerX - modalWidth * 0.5f, bar.Min.y - modalGap - modalHeight),
+            ImVec2(centerX + modalWidth * 0.5f, bar.Min.y - modalGap)
         );
 
         if (state_.activeModal == VrPlayerModal::Playlist) {
@@ -420,24 +504,27 @@ void VrPlayerPanel::draw() {
                 ImGui::PopID();
             }
         } else {
-            drawModalFrame(modal, "", false);
-            const float tabY = modal.Min.y + 14.f;
-            const float tabWidth = 132.f;
-            const float tabHeight = 36.f;
-            const ImRect displayTab(ImVec2(modal.Min.x + 38.f, tabY), ImVec2(modal.Min.x + 38.f + tabWidth, tabY + tabHeight));
-            const ImRect subTab(ImVec2(displayTab.Max.x + 8.f, tabY), ImVec2(displayTab.Max.x + 8.f + tabWidth, tabY + tabHeight));
-            const ImRect audioTab(ImVec2(subTab.Max.x + 8.f, tabY), ImVec2(subTab.Max.x + 8.f + tabWidth, tabY + tabHeight));
-            if (drawSegment("DDDVR_TAB_DISPLAY", displayTab, "Дисплей", state_.activeSettingsTab == VrSettingsTab::Display)) {
-                pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Display));
-            }
-            if (drawSegment("DDDVR_TAB_SUBTITLES", subTab, "Субтитры", state_.activeSettingsTab == VrSettingsTab::Subtitles)) {
-                pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Subtitles));
-            }
-            if (drawSegment("DDDVR_TAB_AUDIO", audioTab, "Аудио", state_.activeSettingsTab == VrSettingsTab::Audio)) {
-                pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Audio));
+            const bool audioOnlyModal = state_.activeSettingsTab == VrSettingsTab::Audio;
+            drawModalFrame(modal, audioOnlyModal ? "Аудио" : "", false);
+            if (!audioOnlyModal) {
+                const float tabY = modal.Min.y + 14.f;
+                const float tabWidth = 132.f;
+                const float tabHeight = 36.f;
+                const ImRect displayTab(ImVec2(modal.Min.x + 38.f, tabY), ImVec2(modal.Min.x + 38.f + tabWidth, tabY + tabHeight));
+                const ImRect subTab(ImVec2(displayTab.Max.x + 8.f, tabY), ImVec2(displayTab.Max.x + 8.f + tabWidth, tabY + tabHeight));
+                const ImRect audioTab(ImVec2(subTab.Max.x + 8.f, tabY), ImVec2(subTab.Max.x + 8.f + tabWidth, tabY + tabHeight));
+                if (drawSegment("DDDVR_TAB_DISPLAY", displayTab, "Дисплей", state_.activeSettingsTab == VrSettingsTab::Display)) {
+                    pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Display));
+                }
+                if (drawSegment("DDDVR_TAB_SUBTITLES", subTab, "Субтитры", state_.activeSettingsTab == VrSettingsTab::Subtitles)) {
+                    pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Subtitles));
+                }
+                if (drawSegment("DDDVR_TAB_AUDIO", audioTab, "Аудио", state_.activeSettingsTab == VrSettingsTab::Audio)) {
+                    pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Audio));
+                }
             }
 
-            const ImRect content(ImVec2(modal.Min.x + 28.f, modal.Min.y + 64.f), ImVec2(modal.Max.x - 28.f, modal.Max.y - 16.f));
+            const ImRect content(ImVec2(modal.Min.x + 28.f, modal.Min.y + 64.f), ImVec2(modal.Max.x - 28.f, modal.Max.y - 18.f));
             draw->PushClipRect(content.Min, content.Max, true);
             if (state_.activeSettingsTab == VrSettingsTab::Display) {
                 draw->AddText(ImVec2(content.Min.x, content.Min.y), VrPlayerTheme::TextMuted, "Соотношение сторон");
@@ -483,17 +570,7 @@ void VrPlayerPanel::draw() {
                     draw->AddCircleFilled(ImVec2(slider.Min.x + slider.GetWidth() * bright, slider.GetCenter().y), 7.f, IM_COL32(242, 246, 255, 240));
                 }
             } else if (state_.activeSettingsTab == VrSettingsTab::Audio) {
-                const ImRect delayRow(ImVec2(content.Min.x, content.Min.y), ImVec2(content.Max.x, content.Min.y + 44.f));
-                draw->AddRectFilled(delayRow.Min, delayRow.Max, VrPlayerTheme::RowBg, 10.f);
-                draw->AddText(ImVec2(delayRow.Min.x + 18.f, delayRow.Min.y + 13.f), VrPlayerTheme::TextPrimary, "Настройка звуковой дорожки");
-                drawCenteredText(draw, ImRect(ImVec2(delayRow.Max.x - 96.f, delayRow.Min.y + 8.f), ImVec2(delayRow.Max.x - 48.f, delayRow.Max.y - 8.f)), "0с", VrPlayerTheme::TextMuted);
-                const ImRect spatialRow(ImVec2(content.Min.x, content.Min.y + 52.f), ImVec2(content.Max.x, content.Min.y + 96.f));
-                draw->AddRectFilled(spatialRow.Min, spatialRow.Max, VrPlayerTheme::RowBg, 10.f);
-                draw->AddText(ImVec2(spatialRow.Min.x + 18.f, spatialRow.Min.y + 13.f), VrPlayerTheme::TextPrimary, "Пространственное аудио");
-                if (drawToggle("DDDVR_SPATIAL_TOGGLE", ImRect(ImVec2(spatialRow.Max.x - 72.f, spatialRow.Min.y + 8.f), ImVec2(spatialRow.Max.x - 18.f, spatialRow.Min.y + 36.f)), state_.audio.spatialAudio, "Пространственное аудио")) {
-                    pushAction(VrPlayerPanelActionType::ToggleSpatialAudio);
-                }
-                drawTrackRows(state_.audioTracks, ImRect(ImVec2(content.Min.x, content.Min.y + 108.f), content.Max), true);
+                drawTrackRows(state_.audioTracks, content, true);
             } else {
                 const ImRect enabledRow(ImVec2(content.Min.x, content.Min.y), ImVec2(content.Max.x, content.Min.y + 42.f));
                 draw->AddRectFilled(enabledRow.Min, enabledRow.Max, VrPlayerTheme::RowBg, 10.f);
@@ -525,26 +602,31 @@ void VrPlayerPanel::draw() {
 
     draw->AddRectFilled(bar.Min, bar.Max, VrPlayerTheme::BarBg, VrPlayerTheme::MainBarRounding);
     draw->AddRectFilled(bar.Min, ImVec2(bar.Max.x, bar.Min.y + 50.f), IM_COL32(255, 255, 255, 8), VrPlayerTheme::MainBarRounding, ImDrawFlags_RoundCornersTop);
-    if (buffered > progress) {
+    draw->PushClipRect(bar.Min, bar.Max, true);
+    if (buffered > progress && bar.GetWidth() * buffered > 30.f) {
         ImRect bufferedRect = bar;
         bufferedRect.Max.x = bar.Min.x + bar.GetWidth() * buffered;
         draw->AddRectFilled(bufferedRect.Min, bufferedRect.Max, IM_COL32(135, 150, 178, 48), VrPlayerTheme::MainBarRounding, ImDrawFlags_RoundCornersLeft);
     }
     ImRect progressRect = bar;
     progressRect.Max.x = bar.Min.x + bar.GetWidth() * progress;
-    if (progress > 0.001f) {
+    const float progressWidth = progressRect.GetWidth();
+    if (progressWidth > 30.f) {
         draw->AddRectFilled(progressRect.Min, progressRect.Max, VrPlayerTheme::ProgressFill, VrPlayerTheme::MainBarRounding, progress > 0.985f ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersLeft);
-        draw->AddLine(
-            ImVec2(progressRect.Max.x, bar.Min.y + 9.f),
-            ImVec2(progressRect.Max.x, bar.Max.y - 9.f),
-            VrPlayerTheme::ProgressEdge,
-            2.0f
-        );
+        if (progressWidth > 42.f) {
+            draw->AddLine(
+                ImVec2(progressRect.Max.x, bar.Min.y + 9.f),
+                ImVec2(progressRect.Max.x, bar.Max.y - 9.f),
+                VrPlayerTheme::ProgressEdge,
+                2.0f
+            );
+        }
     }
+    draw->PopClipRect();
     const bool pointerOverBar =
         io.MousePos.x >= bar.Min.x && io.MousePos.x <= bar.Max.x &&
         io.MousePos.y >= bar.Min.y && io.MousePos.y <= bar.Max.y;
-    if (pointerOverBar) {
+    if (pointerOverBar && timelineDragging_) {
         const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 8.0f);
         const float markerX = std::clamp(io.MousePos.x, bar.Min.x + 16.f, bar.Max.x - 16.f);
         const ImU32 markerGlow = IM_COL32(150, 225, 255, static_cast<int>(96 + pulse * 56));
@@ -592,34 +674,57 @@ void VrPlayerPanel::draw() {
         timelineDragging_ = false;
     }
 
-    const ImRect leftTime(ImVec2(bar.Min.x + 28.f, bar.Min.y + 15.f), ImVec2(bar.Min.x + 150.f, bar.Min.y + 44.f));
-    const ImRect rightTime(ImVec2(bar.Max.x - 150.f, bar.Min.y + 15.f), ImVec2(bar.Max.x - 28.f, bar.Min.y + 44.f));
+    const float topRowMinY = bar.Min.y + 9.f;
+    const float topRowMaxY = bar.Min.y + 42.f;
+    const ImRect leftTime(ImVec2(bar.Min.x + 28.f, topRowMinY), ImVec2(bar.Min.x + 150.f, topRowMaxY));
+    const ImRect rightTime(ImVec2(bar.Max.x - 150.f, topRowMinY), ImVec2(bar.Max.x - 28.f, topRowMaxY));
     drawClippedText(draw, leftTime, position, VrPlayerTheme::TextMuted);
     const ImVec2 durationSize = ImGui::CalcTextSize(durationText);
-    draw->AddText(ImVec2(rightTime.Max.x - durationSize.x, rightTime.Min.y + 4.f), VrPlayerTheme::TextMuted, durationText);
+    draw->AddText(
+        ImVec2(
+            std::floor(rightTime.Max.x - durationSize.x),
+            std::floor(rightTime.GetCenter().y - durationSize.y * 0.5f)
+        ),
+        VrPlayerTheme::TextMuted,
+        durationText
+    );
 
     const std::string title = state_.title.empty() ? "DDD-VR OpenXR Player" : state_.title;
-    const ImRect titleRect(ImVec2(bar.Min.x + 165.f, bar.Min.y + 12.f), ImVec2(bar.Max.x - 165.f, bar.Min.y + 46.f));
-    const ImVec2 titleSize = ImGui::CalcTextSize(title.c_str());
+    const ImRect titleRect(ImVec2(bar.Min.x + 165.f, topRowMinY), ImVec2(bar.Max.x - 165.f, topRowMaxY));
+    const float titleFontSize = ImGui::GetFontSize() * 0.98f;
+    const ImVec2 titleSize = ImGui::GetFont()->CalcTextSizeA(titleFontSize, 100000.f, 0.0f, title.c_str());
     draw->PushClipRect(titleRect.Min, titleRect.Max, true);
-    draw->AddText(ImVec2(titleRect.GetCenter().x - titleSize.x * 0.5f, titleRect.Min.y + 6.f), IM_COL32(242, 246, 255, 192), title.c_str());
+    draw->AddText(
+        ImGui::GetFont(),
+        titleFontSize,
+        ImVec2(
+            std::floor(titleRect.GetCenter().x - titleSize.x * 0.5f),
+            std::floor(titleRect.GetCenter().y - titleSize.y * 0.5f)
+        ),
+        IM_COL32(248, 250, 255, 224),
+        title.c_str()
+    );
     draw->PopClipRect();
 
     const float buttonCenterY = bar.Min.y + 114.f;
-    const ImRect playlistButton = centeredRect(bar.Min.x + 70.f, buttonCenterY, 66.f, 54.f);
-    const ImRect volumeButton = centeredRect(bar.Min.x + 138.f, buttonCenterY, 66.f, 54.f);
+    const ImRect playlistButton = centeredRect(bar.Min.x + 76.f, buttonCenterY, 66.f, 54.f);
+    const ImRect volumeButton = centeredRect(bar.Min.x + 154.f, buttonCenterY, 66.f, 54.f);
     const ImRect prevButton = centeredRect(centerX - 122.f, buttonCenterY, 70.f, 56.f);
     const ImRect playButton = centeredRect(centerX, buttonCenterY, 82.f, 60.f);
     const ImRect nextButton = centeredRect(centerX + 122.f, buttonCenterY, 70.f, 56.f);
-    const ImRect envButton = centeredRect(bar.Max.x - 250.f, buttonCenterY, 66.f, 54.f);
-    const ImRect projectionButton = centeredRect(bar.Max.x - 168.f, buttonCenterY, 72.f, 54.f);
-    const ImRect moreButton = centeredRect(bar.Max.x - 86.f, buttonCenterY, 66.f, 54.f);
+    const ImRect audioButton = centeredRect(bar.Max.x - 320.f, buttonCenterY, 70.f, 56.f);
+    const ImRect envButton = centeredRect(bar.Max.x - 240.f, buttonCenterY, 66.f, 54.f);
+    const ImRect projectionButton = centeredRect(bar.Max.x - 158.f, buttonCenterY, 72.f, 54.f);
+    const ImRect moreButton = centeredRect(bar.Max.x - 76.f, buttonCenterY, 66.f, 54.f);
 
     if (drawSmallIconButton("DDDVR_BTN_PLAYLIST", playlistButton, IconKind::Playlist, "Плейлист")) {
         pushAction(VrPlayerPanelActionType::TogglePlaylist);
     }
     if (drawSmallIconButton("DDDVR_BTN_VOLUME", volumeButton, state_.muted ? IconKind::Muted : IconKind::Volume, state_.muted ? "Включить звук" : "Звук")) {
         pushAction(VrPlayerPanelActionType::ToggleVolume);
+    }
+    if (drawSmallIconButton("DDDVR_BTN_AUDIO_SWITCHER", audioButton, IconKind::Microphone, "Озвучка")) {
+        pushAction(VrPlayerPanelActionType::SetSettingsTab, static_cast<int>(VrSettingsTab::Audio));
     }
     if (drawSmallIconButton("DDDVR_BTN_PREV", prevButton, IconKind::Previous, "Назад")) {
         seekBackRequested_ = true;

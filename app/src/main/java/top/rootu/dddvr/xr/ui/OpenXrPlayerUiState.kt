@@ -48,6 +48,7 @@ data class OpenXrDisplayUiState(
     val aspectRatio: String,
     val playbackSpeed: Float,
     val enhanceVideo: Boolean,
+    val hdrVideo: Boolean,
     val brightness: Float
 )
 

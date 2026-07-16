@@ -8,6 +8,20 @@ namespace {
 const char* sessionStateToString(XrSessionState state){
  switch(state){case XR_SESSION_STATE_UNKNOWN:return "XR_SESSION_STATE_UNKNOWN";case XR_SESSION_STATE_IDLE:return "XR_SESSION_STATE_IDLE";case XR_SESSION_STATE_READY:return "XR_SESSION_STATE_READY";case XR_SESSION_STATE_SYNCHRONIZED:return "XR_SESSION_STATE_SYNCHRONIZED";case XR_SESSION_STATE_VISIBLE:return "XR_SESSION_STATE_VISIBLE";case XR_SESSION_STATE_FOCUSED:return "XR_SESSION_STATE_FOCUSED";case XR_SESSION_STATE_STOPPING:return "XR_SESSION_STATE_STOPPING";case XR_SESSION_STATE_LOSS_PENDING:return "XR_SESSION_STATE_LOSS_PENDING";case XR_SESSION_STATE_EXITING:return "XR_SESSION_STATE_EXITING";default:return "XR_SESSION_STATE_UNKNOWN";}
 }
+
+const char* colorSpaceName(XrColorSpaceFB colorSpace) {
+    switch (colorSpace) {
+        case XR_COLOR_SPACE_UNMANAGED_FB: return "UNMANAGED";
+        case XR_COLOR_SPACE_REC2020_FB: return "REC2020";
+        case XR_COLOR_SPACE_REC709_FB: return "REC709";
+        case XR_COLOR_SPACE_RIFT_CV1_FB: return "RIFT_CV1";
+        case XR_COLOR_SPACE_RIFT_S_FB: return "RIFT_S";
+        case XR_COLOR_SPACE_QUEST_FB: return "QUEST";
+        case XR_COLOR_SPACE_P3_FB: return "P3";
+        case XR_COLOR_SPACE_ADOBE_RGB_FB: return "ADOBE_RGB";
+        default: return "UNKNOWN";
+    }
+}
 }
 
 bool OpenXrSession::hasExtension(const char* name) { uint32_t count = 0; xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr); std::vector<XrExtensionProperties> exts(count, {XR_TYPE_EXTENSION_PROPERTIES}); xrEnumerateInstanceExtensionProperties(nullptr, count, &count, exts.data()); for (auto& e : exts) if (strcmp(e.extensionName, name) == 0) return true; return false; }
@@ -21,6 +35,11 @@ bool OpenXrSession::initializeLoaderAndInstance() {
     static bool loaderOkLogged=false; if(!loaderOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "LOADER_OK"); loaderOkLogged=true; }
     if (!hasExtension(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME) || !hasExtension(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME)) { lastError_ = "required extension missing"; return false; }
     std::vector<const char*> enabled{XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME, XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
+    fbColorSpaceEnabled_ = hasExtension(XR_FB_COLOR_SPACE_EXTENSION_NAME);
+    if (fbColorSpaceEnabled_) {
+        enabled.push_back(XR_FB_COLOR_SPACE_EXTENSION_NAME);
+    }
+    XR_LOGI("DDDVR/OpenXRColor", "XR_FB_color_space available=%d enabled=%d", fbColorSpaceEnabled_ ? 1 : 0, fbColorSpaceEnabled_ ? 1 : 0);
     XrInstanceCreateInfoAndroidKHR ai{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR}; ai.applicationVM = dddvr::openxr::javaVm(); ai.applicationActivity = dddvr::openxr::applicationActivity();
     XR_LOGI("DDDVR/OpenXRSession", "androidCreateInfo vm=%p activity=%p", ai.applicationVM, ai.applicationActivity);
     if (!ai.applicationVM || !ai.applicationActivity) { lastError_ = "Android create instance info missing VM or Activity"; return false; }
@@ -52,7 +71,125 @@ bool OpenXrSession::prepareGraphics() {
     return true;
 }
 
-bool OpenXrSession::createSession() { XrGraphicsBindingOpenGLESAndroidKHR gl{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR}; gl.display = eglDisplay_; gl.config = eglConfig_; gl.context = eglContext_; XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO}; sci.next = &gl; sci.systemId = systemId_; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrCreateSession"); XrResult r = xrCreateSession(instance_, &sci, &session_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrCreateSession result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "SESSION_FAIL result=%d", r); lastError_ = "xrCreateSession failed: " + std::to_string(r); return false; } static bool sessionOkLogged=false; if(!sessionOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "SESSION_OK"); sessionOkLogged=true; } return true; }
+void OpenXrSession::initializeColorSpaceExtension() {
+    fbColorSpaceReady_ = false;
+    supportedColorSpaces_.clear();
+    currentColorSpace_ = XR_COLOR_SPACE_MAX_ENUM_FB;
+    xrEnumerateColorSpacesFB_ = nullptr;
+    xrSetColorSpaceFB_ = nullptr;
+    if (!fbColorSpaceEnabled_) {
+        XR_LOGI("DDDVR/OpenXRColor", "XR_COLOR_SPACE_UNAVAILABLE extension=XR_FB_color_space");
+        return;
+    }
+
+    XrResult r = xrGetInstanceProcAddr(
+        instance_,
+        "xrEnumerateColorSpacesFB",
+        reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateColorSpacesFB_)
+    );
+    if (r != XR_SUCCESS || xrEnumerateColorSpacesFB_ == nullptr) {
+        XR_LOGW("DDDVR/OpenXRColor", "XR_COLOR_SPACE_ENUM_PROC_MISSING result=%d", r);
+        return;
+    }
+    r = xrGetInstanceProcAddr(
+        instance_,
+        "xrSetColorSpaceFB",
+        reinterpret_cast<PFN_xrVoidFunction*>(&xrSetColorSpaceFB_)
+    );
+    if (r != XR_SUCCESS || xrSetColorSpaceFB_ == nullptr) {
+        XR_LOGW("DDDVR/OpenXRColor", "XR_COLOR_SPACE_SET_PROC_MISSING result=%d", r);
+        return;
+    }
+
+    uint32_t count = 0;
+    r = xrEnumerateColorSpacesFB_(session_, 0, &count, nullptr);
+    if (r != XR_SUCCESS || count == 0) {
+        XR_LOGW("DDDVR/OpenXRColor", "XR_COLOR_SPACE_ENUM_EMPTY result=%d count=%u", r, count);
+        return;
+    }
+    supportedColorSpaces_.resize(count);
+    r = xrEnumerateColorSpacesFB_(session_, count, &count, supportedColorSpaces_.data());
+    if (r != XR_SUCCESS) {
+        XR_LOGW("DDDVR/OpenXRColor", "XR_COLOR_SPACE_ENUM_FAILED result=%d", r);
+        supportedColorSpaces_.clear();
+        return;
+    }
+    supportedColorSpaces_.resize(count);
+    for (XrColorSpaceFB colorSpace : supportedColorSpaces_) {
+        XR_LOGI("DDDVR/OpenXRColor", "XR_COLOR_SPACE_SUPPORTED value=%d name=%s", colorSpace, colorSpaceName(colorSpace));
+    }
+    fbColorSpaceReady_ = true;
+}
+
+bool OpenXrSession::supportsColorSpace(XrColorSpaceFB colorSpace) const {
+    for (XrColorSpaceFB supported : supportedColorSpaces_) {
+        if (supported == colorSpace) return true;
+    }
+    return false;
+}
+
+bool OpenXrSession::setColorSpaceFromPreference(const std::vector<XrColorSpaceFB>& preference, const char* reason) {
+    if (!fbColorSpaceEnabled_) return true;
+    if (!fbColorSpaceReady_ || xrSetColorSpaceFB_ == nullptr) return true;
+    XrColorSpaceFB selected = XR_COLOR_SPACE_MAX_ENUM_FB;
+    for (XrColorSpaceFB candidate : preference) {
+        if (supportsColorSpace(candidate)) {
+            selected = candidate;
+            break;
+        }
+    }
+    if (selected == XR_COLOR_SPACE_MAX_ENUM_FB && !supportedColorSpaces_.empty()) {
+        selected = supportedColorSpaces_.front();
+    }
+    if (selected == XR_COLOR_SPACE_MAX_ENUM_FB) return true;
+    if (selected == currentColorSpace_) return true;
+
+    const XrResult r = xrSetColorSpaceFB_(session_, selected);
+    if (r != XR_SUCCESS) {
+        XR_LOGW("DDDVR/OpenXRColor", "XR_COLOR_SPACE_SET_FAILED result=%d requested=%s reason=%s", r, colorSpaceName(selected), reason);
+        return false;
+    }
+    currentColorSpace_ = selected;
+    XR_LOGI("DDDVR/OpenXRColor", "XR_COLOR_SPACE_SET value=%d name=%s reason=%s", selected, colorSpaceName(selected), reason);
+    return true;
+}
+
+bool OpenXrSession::setHdrColorSpace(bool hdrVideo) {
+    if (session_ == XR_NULL_HANDLE) return false;
+    if (hdrVideo) {
+        return setColorSpaceFromPreference(
+            {XR_COLOR_SPACE_REC2020_FB, XR_COLOR_SPACE_P3_FB, XR_COLOR_SPACE_REC709_FB, XR_COLOR_SPACE_UNMANAGED_FB},
+            "hdr"
+        );
+    }
+    return setColorSpaceFromPreference(
+        {XR_COLOR_SPACE_REC709_FB, XR_COLOR_SPACE_QUEST_FB, XR_COLOR_SPACE_P3_FB, XR_COLOR_SPACE_UNMANAGED_FB},
+        "sdr"
+    );
+}
+
+bool OpenXrSession::createSession() {
+    XrGraphicsBindingOpenGLESAndroidKHR gl{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
+    gl.display = eglDisplay_;
+    gl.config = eglConfig_;
+    gl.context = eglContext_;
+    XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO};
+    sci.next = &gl;
+    sci.systemId = systemId_;
+    XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrCreateSession");
+    XrResult r = xrCreateSession(instance_, &sci, &session_);
+    XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrCreateSession result=%d", r);
+    if (r != XR_SUCCESS) {
+        XR_LOGE("DDDVR/OpenXRCheck", "SESSION_FAIL result=%d", r);
+        lastError_ = "xrCreateSession failed: " + std::to_string(r);
+        return false;
+    }
+    static bool sessionOkLogged=false;
+    if(!sessionOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "SESSION_OK"); sessionOkLogged=true; }
+    initializeColorSpaceExtension();
+    setHdrColorSpace(false);
+    return true;
+}
 bool OpenXrSession::createReferenceSpace() { XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO}; rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.orientation.w = 1.f; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrCreateReferenceSpace"); XrResult r = xrCreateReferenceSpace(session_, &rs, &appSpace_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrCreateReferenceSpace result=%d", r); if (r != XR_SUCCESS) { XR_LOGE("DDDVR/OpenXRCheck", "REFERENCE_SPACE_FAIL result=%d", r); lastError_ = "xrCreateReferenceSpace failed: " + std::to_string(r); return false; } static bool refOkLogged=false; if(!refOkLogged){ XR_LOGI("DDDVR/OpenXRCheck", "REFERENCE_SPACE_OK"); refOkLogged=true; } return true; }
 bool OpenXrSession::begin() { XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO}; bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrBeginSession state=%s", sessionStateToString(state_)); XrResult r = xrBeginSession(session_, &bi); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrBeginSession result=%d", r); return r == XR_SUCCESS; }
 bool OpenXrSession::end() { XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_BEGIN xrEndSession"); XrResult r = xrEndSession(session_); XR_LOGI("DDDVR/OpenXRSession", "XR_CALL_END xrEndSession result=%d", r); return r == XR_SUCCESS; }

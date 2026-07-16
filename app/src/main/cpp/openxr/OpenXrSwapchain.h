@@ -12,6 +12,7 @@ public:
     XrSwapchain handle() const { return swapchain_; }
     int32_t width() const { return width_; }
     int32_t height() const { return height_; }
+    int64_t format() const { return format_; }
     GLuint activeColorTexture() const;
 
 private:
@@ -19,6 +20,7 @@ private:
     std::vector<XrSwapchainImageOpenGLESKHR> images_;
     int32_t width_ = 0;
     int32_t height_ = 0;
+    int64_t format_ = 0;
     uint32_t activeIndex_ = 0;
     bool imageAcquired_ = false;
 };

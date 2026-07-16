@@ -2,6 +2,7 @@
 #include "OpenXrPlatform.h"
 #include "OpenXrInput.h"
 #include "../video/ExternalOesVideoTexture.h"
+#include "../video/FfmpegVideoTexture.h"
 #include "../gl/CinemaScreenRenderer.h"
 #include "../ui/VrPicoGui.h"
 #include "../ui/VrPlayerPanel.h"
@@ -43,6 +44,9 @@ class OpenXrRenderer {
 public:
     bool initialize(const OpenXrRenderConfig& config);
     void setVideoFrameState(const float* transformMatrix, bool hasVideo);
+    bool uploadFfmpegVideoFrame(const FfmpegVideoFrame& frame);
+    bool importFfmpegHardwareBufferFrame(FfmpegHardwareBufferFrame&& frame);
+    void setFfmpegVideoEnabled(bool enabled);
     void setUiState(
         bool visible,
         bool playing,
@@ -94,6 +98,9 @@ private:
     CinemaUvRect uvRectForEye(int eye) const;
     OpenXrRenderConfig config_;
     ExternalOesVideoTexture video_;
+    FfmpegVideoTexture ffmpegVideo_;
+    bool ffmpegVideoEnabled_ = false;
+    bool ffmpegVideoFrameSeen_ = false;
     CinemaScreenRenderer screen_;
     VrPicoGui uiBackend_;
     VrPlayerPanel playerPanel_;
@@ -109,6 +116,7 @@ private:
     bool pendingUiPlayPause_ = false;
     bool pendingUiSeekBack_ = false;
     bool pendingUiSeekForward_ = false;
+    bool pendingUiExit_ = false;
     bool pendingUiTimelineSeek_ = false;
     bool pendingUiAudioTrackSelected_ = false;
     std::vector<VrPlayerPanelAction> pendingPlayerPanelActions_;
@@ -134,6 +142,7 @@ private:
     bool screenGrabActive_ = false;
     bool uiPanelDragCandidateActive_ = false;
     bool uiPanelDragActive_ = false;
+    bool uiClosePressed_[2]{false, false};
     int uiPanelDragCandidateHand_ = -1;
     int uiPanelDragHand_ = -1;
     XrPosef grabStartPose_{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};

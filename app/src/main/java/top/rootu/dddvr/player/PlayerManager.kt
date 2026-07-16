@@ -2,6 +2,8 @@ package top.rootu.dddvr.player
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.MediaFormat
+import android.os.Build
 import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.util.Log
@@ -10,11 +12,13 @@ import androidx.core.net.toUri
 import androidx.core.os.LocaleListCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
 import androidx.media3.common.Format
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -29,12 +33,15 @@ import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
@@ -50,6 +57,7 @@ import top.rootu.dddvr.model.MediaItem
 import top.rootu.dddvr.utils.MediaFormatHelper
 import top.rootu.dddvr.viewmodel.TrackOption
 import top.rootu.dddvr.xr.ui.OpenXrTrackRow
+import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
@@ -60,8 +68,92 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import androidx.media3.common.MediaItem as Media3MediaItem
 
-private const val MAX_UHD_VIDEO_WIDTH = 4096
-private const val MAX_UHD_VIDEO_HEIGHT = 2304
+private const val MAX_UHD_VIDEO_WIDTH = 8192
+private const val MAX_UHD_VIDEO_HEIGHT = 4320
+private const val COLOR_FORMAT_YUVP010 = 0x36
+
+private class HdrMetadataVideoRenderer(
+    context: Context,
+    codecAdapterFactory: MediaCodecAdapter.Factory,
+    mediaCodecSelector: MediaCodecSelector,
+    allowedJoiningTimeMs: Long,
+    enableDecoderFallback: Boolean,
+    eventHandler: Handler,
+    eventListener: VideoRendererEventListener,
+    maxDroppedFramesToNotify: Int
+) : MediaCodecVideoRenderer(
+    context,
+    codecAdapterFactory,
+    mediaCodecSelector,
+    allowedJoiningTimeMs,
+    enableDecoderFallback,
+    eventHandler,
+    eventListener,
+    maxDroppedFramesToNotify
+) {
+    override fun getMediaFormat(
+        format: Format,
+        codecMimeType: String,
+        codecMaxValues: CodecMaxValues,
+        codecOperatingRate: Float,
+        deviceNeedsNoPostProcessWorkaround: Boolean,
+        tunnelingAudioSessionId: Int
+    ): MediaFormat {
+        val mediaFormat = super.getMediaFormat(
+            format,
+            codecMimeType,
+            codecMaxValues,
+            codecOperatingRate,
+            deviceNeedsNoPostProcessWorkaround,
+            tunnelingAudioSessionId
+        )
+        val colorInfo = format.colorInfo
+        val codecs = format.codecs.orEmpty()
+        val isDolbyVision = format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION ||
+            codecs.startsWith("dvh1", ignoreCase = true) ||
+            codecs.startsWith("dvhe", ignoreCase = true)
+        val isHdrTransfer = colorInfo?.let(ColorInfo::isTransferHdr) == true
+        if (!isHdrTransfer && !isDolbyVision) {
+            return mediaFormat
+        }
+
+        val colorStandard = colorInfo?.colorSpace
+            ?.takeIf { it != Format.NO_VALUE && it > 0 }
+            ?: if (isDolbyVision) MediaFormat.COLOR_STANDARD_BT2020 else null
+        val colorTransfer = colorInfo?.colorTransfer
+            ?.takeIf { it != Format.NO_VALUE && it > 0 }
+            ?: if (isDolbyVision) MediaFormat.COLOR_TRANSFER_ST2084 else null
+        val colorRange = colorInfo?.colorRange
+            ?.takeIf { it != Format.NO_VALUE && it > 0 }
+            ?: if (isDolbyVision) MediaFormat.COLOR_RANGE_LIMITED else null
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            colorStandard?.let { mediaFormat.setInteger(MediaFormat.KEY_COLOR_STANDARD, it) }
+            colorTransfer?.let { mediaFormat.setInteger(MediaFormat.KEY_COLOR_TRANSFER, it) }
+            colorRange?.let { mediaFormat.setInteger(MediaFormat.KEY_COLOR_RANGE, it) }
+            colorInfo?.hdrStaticInfo?.takeIf { it.isNotEmpty() }?.let { staticInfo ->
+                mediaFormat.setByteBuffer("hdr-static-info", ByteBuffer.wrap(staticInfo))
+            }
+        }
+
+        val p010Supported = runCatching {
+            MediaCodecUtil.getDecoderInfos(codecMimeType, false, false).any { decoderInfo ->
+                decoderInfo.capabilities?.colorFormats?.any { it == COLOR_FORMAT_YUVP010 } == true
+            }
+        }.getOrDefault(false)
+        Log.i(
+            "DDDVR/PlayerManager",
+                "VIDEO_HDR_METADATA_APPLIED width=${format.width} height=${format.height} " +
+                "mime=${format.sampleMimeType} codecMime=$codecMimeType codecs=$codecs " +
+                "standard=${colorStandard ?: -1} transfer=${colorTransfer ?: -1} " +
+                "range=${colorRange ?: -1} sourceStandard=${colorInfo?.colorSpace ?: -1} " +
+                "sourceTransfer=${colorInfo?.colorTransfer ?: -1} sourceRange=${colorInfo?.colorRange ?: -1} " +
+                "hdrStatic=${colorInfo?.hdrStaticInfo?.size ?: 0} " +
+                "dolbyVision=$isDolbyVision p010Supported=$p010Supported"
+        )
+        return mediaFormat
+    }
+}
 
 class PlayerManager(
     private val context: Context,
@@ -82,6 +174,7 @@ class PlayerManager(
     private var currentPosition = 0L
     private var currentMediaItems: List<Media3MediaItem> = emptyList()
     private var playWhenReady = true
+    private var videoTrackDisabled = false
 
     private var currentTrackInfo: Map<Int, UnifiedMetadataReader.TrackInfo> = emptyMap()
     var onMetadataAvailable: (() -> Unit)? = null
@@ -239,6 +332,7 @@ class PlayerManager(
         val trackSelector = DefaultTrackSelector(appContext)
         val parametersBuilder = trackSelector.buildUponParameters()
             .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, videoTrackDisabled)
             .setTunnelingEnabled(settingsRepo.isTunnelingEnabled())
             .setMaxVideoSize(MAX_UHD_VIDEO_WIDTH, MAX_UHD_VIDEO_HEIGHT)
             .setMaxVideoBitrate(Int.MAX_VALUE)
@@ -279,9 +373,67 @@ class PlayerManager(
 
         trackSelector.setParameters(parametersBuilder)
 
+        val requestedDecoderPriority = settingsRepo.getDecoderPriority()
+        val effectiveDecoderPriority = when (requestedDecoderPriority) {
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+            else -> requestedDecoderPriority
+        }
+        if (effectiveDecoderPriority != requestedDecoderPriority) {
+            Log.i(
+                "DDDVR/PlayerManager",
+                "VIDEO_DECODER_PRIORITY requested=$requestedDecoderPriority effective=$effectiveDecoderPriority reason=prefer_hardware_for_uhd_hdr"
+            )
+        } else {
+            Log.i("DDDVR/PlayerManager", "VIDEO_DECODER_PRIORITY effective=$effectiveDecoderPriority")
+        }
+
         val renderersFactory = object : DefaultRenderersFactory(appContext) {
             init {
                 setMediaCodecSelector(mediaCodecSelector)
+            }
+
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>
+            ) {
+                val startIndex = out.size
+                super.buildVideoRenderers(
+                    context,
+                    extensionRendererMode,
+                    mediaCodecSelector,
+                    enableDecoderFallback,
+                    eventHandler,
+                    eventListener,
+                    allowedVideoJoiningTimeMs,
+                    out
+                )
+
+                val renderer = HdrMetadataVideoRenderer(
+                    context,
+                    getCodecAdapterFactory(),
+                    mediaCodecSelector,
+                    allowedVideoJoiningTimeMs,
+                    enableDecoderFallback,
+                    eventHandler,
+                    eventListener,
+                    MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY
+                )
+                for (index in startIndex until out.size) {
+                    if (out[index] is MediaCodecVideoRenderer) {
+                        out[index] = renderer
+                        Log.i("DDDVR/PlayerManager", "VIDEO_RENDERER_HDR_METADATA installed index=$index")
+                        return
+                    }
+                }
+
+                out.add(startIndex, renderer)
+                Log.w("DDDVR/PlayerManager", "VIDEO_RENDERER_HDR_METADATA inserted index=$startIndex")
             }
 
             override fun buildAudioRenderers(
@@ -355,7 +507,7 @@ class PlayerManager(
                 )
             }
         }.apply {
-            setExtensionRendererMode(settingsRepo.getDecoderPriority())
+            setExtensionRendererMode(effectiveDecoderPriority)
             setEnableDecoderFallback(true) // Разрешаем софтовый декодер
         }
 
@@ -426,7 +578,31 @@ class PlayerManager(
                 format: Format,
                 decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?
             ) {
+                logVideoDecoderCandidates(format)
+                Log.i(
+                    "DDDVR/PlayerManager",
+                    "VIDEO_INPUT_FORMAT width=${format.width} height=${format.height} sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate} decoderMode=$effectiveDecoderPriority"
+                )
                 onVideoFormatChanged?.invoke(format)
+            }
+
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long
+            ) {
+                Log.i(
+                    "DDDVR/PlayerManager",
+                    "VIDEO_DECODER_INITIALIZED name=$decoderName initMs=$initializationDurationMs"
+                )
+            }
+
+            override fun onVideoCodecError(
+                eventTime: AnalyticsListener.EventTime,
+                videoCodecError: Exception
+            ) {
+                Log.e("DDDVR/PlayerManager", "VIDEO_CODEC_ERROR", videoCodecError)
             }
 
             override fun onAudioTrackInitialized(
@@ -458,6 +634,32 @@ class PlayerManager(
                 player.play()
             }
         }
+    }
+
+    fun setVideoTrackDisabled(disabled: Boolean, reason: String) {
+        videoTrackDisabled = disabled
+        val player = exoPlayer
+        if (player == null) {
+            Log.i(
+                "DDDVR/PlayerManager",
+                "VIDEO_TRACK_DISABLE_DEFERRED disabled=$disabled reason=$reason"
+            )
+            return
+        }
+
+        val builder = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, disabled)
+        if (!disabled) {
+            builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        }
+        player.trackSelectionParameters = builder.build()
+        if (disabled) {
+            player.clearVideoSurface()
+        }
+        Log.i(
+            "DDDVR/PlayerManager",
+            "VIDEO_TRACK_DISABLED disabled=$disabled reason=$reason"
+        )
     }
 
     private fun buildMediaSources(exoItems: List<Media3MediaItem>): List<MediaSource> {
@@ -622,13 +824,31 @@ class PlayerManager(
         }
     }
 
+    private fun logVideoDecoderCandidates(format: Format) {
+        val mimeType = format.sampleMimeType?.takeIf { it.isNotBlank() } ?: return
+        val summary = runCatching {
+            MediaCodecUtil.getDecoderInfos(mimeType, false, false)
+                .take(8)
+                .joinToString { info ->
+                    val supported = runCatching { info.isFormatSupported(format) }.getOrDefault(false)
+                    "${info.name}[supported=$supported]"
+                }
+        }.getOrElse { error ->
+            "query_failed=${error::class.java.simpleName}:${error.message.orEmpty()}"
+        }
+        Log.i(
+            "DDDVR/PlayerManager",
+            "VIDEO_DECODER_CANDIDATES width=${format.width} height=${format.height} mime=$mimeType codecs=${format.codecs} colorInfo=${format.colorInfo} candidates=$summary"
+        )
+    }
+
     fun getTrackMetadata(): Map<Int, UnifiedMetadataReader.TrackInfo> = currentTrackInfo
 
     fun getAudioTrackRows(): List<OpenXrTrackRow> {
         val player = exoPlayer ?: return emptyList()
         val (options, selectedIndex) = TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
-        return options.mapIndexed { index, option ->
-            option.toOpenXrTrackRow(prefix = "audio", index = index, selectedIndex = selectedIndex)
+        return options.mapIndexedNotNull { index, option ->
+            if (option.isOff) null else option.toOpenXrTrackRow(prefix = "audio", index = index, selectedIndex = selectedIndex)
         }
     }
 
@@ -643,37 +863,45 @@ class PlayerManager(
     fun currentAudioTrackLabel(): String {
         val player = exoPlayer ?: return ""
         val (options, selectedIndex) = TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
-        return options.getOrNull(selectedIndex)?.let { TrackLogic.buildTrackLabel(it, appContext) }.orEmpty()
+        return options.getOrNull(selectedIndex)?.let { buildOpenXrTrackTitle("audio", it, selectedIndex) }.orEmpty()
     }
 
     fun currentSubtitleTrackLabel(): String {
         val player = exoPlayer ?: return ""
         val (options, selectedIndex) = TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
-        return options.getOrNull(selectedIndex)?.let { TrackLogic.buildTrackLabel(it, appContext) }.orEmpty()
+        return options.getOrNull(selectedIndex)?.let { buildOpenXrTrackTitle("subtitle", it, selectedIndex) }.orEmpty()
     }
-
-    fun selectAudioTrack(id: String) {
+    fun selectAudioTrack(id: String): Boolean =
         selectTrackById(id = id, prefix = "audio", trackType = C.TRACK_TYPE_AUDIO)
-    }
 
-    fun selectSubtitleTrack(id: String) {
+    fun selectSubtitleTrack(id: String): Boolean =
         selectTrackById(id = id, prefix = "subtitle", trackType = C.TRACK_TYPE_TEXT)
+
+    fun disableSubtitles(): Boolean {
+        val player = exoPlayer ?: return false
+        val builder = player.trackSelectionParameters.buildUpon()
+        builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        player.trackSelectionParameters = builder.build()
+        Log.i("DDDVR/PlayerManager", "XR_TRACK_SELECT_APPLIED type=subtitle id=subtitle:off")
+        return true
     }
 
-    fun disableSubtitles() {
-        val player = exoPlayer ?: return
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
-    }
-
-    fun enableFirstSubtitleTrack() {
-        val player = exoPlayer ?: return
+    fun enableFirstSubtitleTrack(): Boolean {
+        val player = exoPlayer ?: return false
         val (options, _) = TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
-        val firstSubtitleIndex = options.indexOfFirst { !it.isOff }
-        if (firstSubtitleIndex >= 0) {
-            selectSubtitleTrack("subtitle:$firstSubtitleIndex")
+        val firstSubtitle = options.firstOrNull { !it.isOff && it.groupIndex >= 0 }
+            ?: options.firstOrNull { !it.isOff }
+            ?: return false
+        return selectSubtitleTrack(firstSubtitle.toOpenXrTrackId("subtitle", options.indexOf(firstSubtitle)))
+    }
+
+    private fun TrackOption.toOpenXrTrackId(prefix: String, index: Int): String {
+        if (isOff) return "$prefix:off"
+        return if (groupIndex >= 0 && trackIndex >= 0) {
+            "$prefix:$groupIndex:$trackIndex"
+        } else {
+            "$prefix:$index"
         }
     }
 
@@ -682,50 +910,227 @@ class PlayerManager(
         index: Int,
         selectedIndex: Int
     ): OpenXrTrackRow {
-        val format = format
-        val subtitle = if (format == null || isOff) {
-            ""
-        } else {
-            listOfNotNull(
-                format.language?.takeIf { it.isNotBlank() },
-                format.sampleMimeType?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-            ).joinToString(" · ")
-        }
         val supported = isOff || group?.isTrackSupported(trackIndex) == true
         return OpenXrTrackRow(
-            id = "$prefix:$index",
-            title = TrackLogic.buildTrackLabel(this, appContext),
-            subtitle = subtitle,
+            id = toOpenXrTrackId(prefix, index),
+            title = buildOpenXrTrackTitle(prefix, this, index),
+            subtitle = buildOpenXrTrackSubtitle(prefix, this),
             selected = index == selectedIndex,
             enabled = supported
         )
     }
 
-    private fun selectTrackById(id: String, prefix: String, trackType: Int) {
-        val player = exoPlayer ?: return
-        val expectedPrefix = "$prefix:"
-        if (!id.startsWith(expectedPrefix)) return
-        val index = id.removePrefix(expectedPrefix).toIntOrNull() ?: return
-        val (options, _) = when (trackType) {
-            C.TRACK_TYPE_AUDIO -> TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo)
-            C.TRACK_TYPE_TEXT -> TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo)
-            else -> return
-        }
-        val option = options.getOrNull(index) ?: return
-        val builder = player.trackSelectionParameters.buildUpon()
-        if (option.isOff) {
-            builder.setTrackTypeDisabled(trackType, true)
-        } else {
-            builder.setTrackTypeDisabled(trackType, false)
-            option.group?.let { group ->
-                builder.setOverrideForType(
-                    TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex)
-                )
+    private fun buildOpenXrTrackTitle(prefix: String, option: TrackOption, index: Int): String {
+        if (option.isOff) return appContext.getString(top.rootu.dddvr.R.string.track_off)
+        val format = option.format
+        val number = option.index.takeIf { it > 0 } ?: index.coerceAtLeast(1)
+        val language = languageLabel(format?.language)
+        val explicitName = cleanTrackName(option)
+        return when (prefix) {
+            "audio" -> {
+                val base = explicitName ?: language ?: "\u0414\u043E\u0440\u043E\u0436\u043A\u0430 $number"
+                val tech = format?.let {
+                    listOfNotNull(audioCodecLabel(it), channelLayoutLabel(it))
+                        .distinct()
+                        .joinToString(" ")
+                }.orEmpty()
+                if (tech.isBlank()) base else "$base - $tech"
             }
+            "subtitle" -> explicitName ?: language ?: "\u0421\u0443\u0431\u0442\u0438\u0442\u0440\u044B $number"
+            else -> explicitName ?: language ?: "Track $number"
         }
-        player.trackSelectionParameters = builder.build()
     }
 
+    private fun buildOpenXrTrackSubtitle(prefix: String, option: TrackOption): String {
+        val format = option.format ?: return ""
+        val number = option.index.takeIf { it > 0 } ?: 0
+        val parts = when (prefix) {
+            "audio" -> emptyList()
+            "subtitle" -> listOfNotNull(
+                languageLabel(format.language),
+                subtitleFormatLabel(format)
+            )
+            else -> listOfNotNull(languageLabel(format.language), format.sampleMimeType?.substringAfterLast('/'))
+        }
+        return parts.distinct().joinToString(" \u00B7 ")
+    }
+
+    private fun cleanTrackName(option: TrackOption): String? {
+        val raw = option.nameFromMeta?.trim()?.takeIf { it.isNotBlank() }
+            ?: option.format?.label?.trim()?.takeIf { it.isNotBlank() }
+            ?: return null
+        return raw.takeIf { !isGenericOpenXrTrackName(it) }
+    }
+
+    private fun isGenericOpenXrTrackName(value: String): Boolean {
+        val normalized = value.trim().lowercase()
+        if (normalized.isBlank()) return true
+        if (normalized.contains("\u0437\u0432\u0443\u043A\u043E\u0432\u0430\u044F \u0434\u043E\u0440\u043E\u0436\u043A\u0430")) return true
+        if (normalized.startsWith("audio") || normalized.startsWith("track ")) return true
+        return normalized in setOf(
+            "ru", "rus", "russian", "\u0440\u0443\u0441\u0441\u043A\u0438\u0439", "\u0440\u0443\u0441\u0441\u043A\u0430\u044F",
+            "en", "eng", "english", "\u0430\u043D\u0433\u043B\u0438\u0439\u0441\u043A\u0438\u0439",
+            "und", "unknown", "default"
+        )
+    }
+
+    private fun languageLabel(language: String?): String? {
+        val normalized = language?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
+        if (normalized == "und" || normalized == "ext") return null
+        return when (normalized) {
+            "ru", "rus" -> "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"
+            "en", "eng" -> "\u0410\u043D\u0433\u043B\u0438\u0439\u0441\u043A\u0438\u0439"
+            "uk", "ukr" -> "\u0423\u043A\u0440\u0430\u0438\u043D\u0441\u043A\u0438\u0439"
+            "de", "deu", "ger" -> "\u041D\u0435\u043C\u0435\u0446\u043A\u0438\u0439"
+            "fr", "fra", "fre" -> "\u0424\u0440\u0430\u043D\u0446\u0443\u0437\u0441\u043A\u0438\u0439"
+            "es", "spa" -> "\u0418\u0441\u043F\u0430\u043D\u0441\u043A\u0438\u0439"
+            "it", "ita" -> "\u0418\u0442\u0430\u043B\u044C\u044F\u043D\u0441\u043A\u0438\u0439"
+            "ja", "jpn" -> "\u042F\u043F\u043E\u043D\u0441\u043A\u0438\u0439"
+            "ko", "kor" -> "\u041A\u043E\u0440\u0435\u0439\u0441\u043A\u0438\u0439"
+            "zh", "zho", "chi" -> "\u041A\u0438\u0442\u0430\u0439\u0441\u043A\u0438\u0439"
+            else -> normalized.uppercase()
+        }
+    }
+    private fun audioCodecLabel(format: Format): String? {
+        return when (format.sampleMimeType) {
+            MimeTypes.AUDIO_AC3 -> "AC3"
+            MimeTypes.AUDIO_E_AC3 -> "E-AC3"
+            MimeTypes.AUDIO_E_AC3_JOC -> "E-AC3 JOC"
+            MimeTypes.AUDIO_DTS -> "DTS"
+            MimeTypes.AUDIO_DTS_HD -> "DTS-HD"
+            MimeTypes.AUDIO_DTS_EXPRESS -> "DTS-X"
+            MimeTypes.AUDIO_TRUEHD -> "TrueHD"
+            MimeTypes.AUDIO_AAC -> "AAC"
+            MimeTypes.AUDIO_MPEG -> "MP3"
+            MimeTypes.AUDIO_FLAC -> "FLAC"
+            MimeTypes.AUDIO_OPUS -> "Opus"
+            MimeTypes.AUDIO_VORBIS -> "Vorbis"
+            MimeTypes.AUDIO_RAW -> "PCM"
+            else -> format.sampleMimeType?.substringAfterLast('/')?.uppercase()
+        }?.takeIf { it.isNotBlank() }
+    }
+
+    private fun subtitleFormatLabel(format: Format): String? {
+        return when (format.sampleMimeType) {
+            MimeTypes.APPLICATION_SUBRIP -> "SRT"
+            MimeTypes.TEXT_VTT -> "VTT"
+            MimeTypes.TEXT_SSA -> "SSA"
+            MimeTypes.APPLICATION_TTML -> "TTML"
+            MimeTypes.APPLICATION_MP4VTT -> "VTT"
+            MimeTypes.APPLICATION_PGS -> "PGS"
+            MimeTypes.APPLICATION_VOBSUB -> "VobSub"
+            MimeTypes.APPLICATION_DVBSUBS -> "DVB"
+            else -> format.sampleMimeType?.substringAfterLast('/')?.uppercase()
+        }?.takeIf { it.isNotBlank() }
+    }
+
+    private fun channelLayoutLabel(format: Format): String? {
+        return when (format.channelCount) {
+            1 -> "1.0"
+            2 -> "2.0"
+            3 -> "2.1"
+            4 -> "4.0"
+            5 -> "5.0"
+            6 -> "5.1"
+            7 -> "6.1"
+            8 -> "7.1"
+            Format.NO_VALUE, 0 -> null
+            else -> if (format.channelCount > 0) "${format.channelCount}ch" else null
+        }
+    }
+
+    private fun bitrateLabel(format: Format): String? {
+        return if (format.bitrate != Format.NO_VALUE && format.bitrate > 0) {
+            "${format.bitrate / 1000}k"
+        } else {
+            null
+        }
+    }
+    private data class TrackSelectionTarget(
+        val id: String,
+        val isOff: Boolean,
+        val group: Tracks.Group? = null,
+        val trackIndex: Int = -1,
+        val option: TrackOption? = null
+    )
+
+    private fun trackOptionsFor(player: ExoPlayer, trackType: Int): List<TrackOption>? {
+        return when (trackType) {
+            C.TRACK_TYPE_AUDIO -> TrackLogic.extractAudioTracks(player.currentTracks, currentTrackInfo).first
+            C.TRACK_TYPE_TEXT -> TrackLogic.extractSubtitleTracks(player.currentTracks, currentTrackInfo).first
+            else -> null
+        }
+    }
+
+    private fun resolveTrackSelectionTarget(
+        player: ExoPlayer,
+        id: String,
+        prefix: String,
+        trackType: Int
+    ): TrackSelectionTarget? {
+        val expectedPrefix = "$prefix:"
+        if (!id.startsWith(expectedPrefix)) return null
+        val body = id.removePrefix(expectedPrefix)
+        if (body == "off") return TrackSelectionTarget(id = "$prefix:off", isOff = true)
+
+        val stableParts = body.split(':')
+        if (stableParts.size == 2) {
+            val groupIndex = stableParts[0].toIntOrNull() ?: return null
+            val trackIndex = stableParts[1].toIntOrNull() ?: return null
+            val group = player.currentTracks.groups.getOrNull(groupIndex) ?: return null
+            if (group.type != trackType || trackIndex !in 0 until group.length) return null
+            val option = trackOptionsFor(player, trackType)
+                ?.firstOrNull { it.groupIndex == groupIndex && it.trackIndex == trackIndex }
+            return TrackSelectionTarget(
+                id = "$prefix:$groupIndex:$trackIndex",
+                isOff = false,
+                group = group,
+                trackIndex = trackIndex,
+                option = option
+            )
+        }
+
+        val legacyIndex = body.toIntOrNull() ?: return null
+        val options = trackOptionsFor(player, trackType) ?: return null
+        val option = options.getOrNull(legacyIndex) ?: return null
+        if (option.isOff) return TrackSelectionTarget(id = "$prefix:off", isOff = true, option = option)
+        val group = option.group ?: return null
+        return TrackSelectionTarget(
+            id = option.toOpenXrTrackId(prefix, legacyIndex),
+            isOff = false,
+            group = group,
+            trackIndex = option.trackIndex,
+            option = option
+        )
+    }
+
+    private fun selectTrackById(id: String, prefix: String, trackType: Int): Boolean {
+        val player = exoPlayer ?: return false
+        val target = resolveTrackSelectionTarget(player, id, prefix, trackType) ?: run {
+            Log.w("DDDVR/PlayerManager", "XR_TRACK_SELECT_IGNORED type=$prefix id=$id reason=unresolved")
+            return false
+        }
+        val builder = player.trackSelectionParameters.buildUpon()
+        builder.clearOverridesOfType(trackType)
+        if (target.isOff) {
+            builder.setTrackTypeDisabled(trackType, true)
+        } else {
+            val group = target.group ?: return false
+            if (!group.isTrackSupported(target.trackIndex)) {
+                Log.w("DDDVR/PlayerManager", "XR_TRACK_SELECT_IGNORED type=$prefix id=${target.id} reason=unsupported")
+                return false
+            }
+            builder.setTrackTypeDisabled(trackType, false)
+            builder.setOverrideForType(
+                TrackSelectionOverride(group.mediaTrackGroup, target.trackIndex)
+            )
+        }
+        player.trackSelectionParameters = builder.build()
+        val label = target.option?.let { buildOpenXrTrackTitle(prefix, it, it.index) }.orEmpty()
+        val subtitle = target.option?.let { buildOpenXrTrackSubtitle(prefix, it) }.orEmpty()
+        Log.i("DDDVR/PlayerManager", "XR_TRACK_SELECT_APPLIED type=$prefix id=${target.id} label=$label subtitle=$subtitle")
+        return true
+    }
     fun togglePlayPause() {
         exoPlayer?.let { if (it.isPlaying) it.pause() else it.play() }
     }

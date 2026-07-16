@@ -194,6 +194,7 @@ VrPlayerUiState parsePlayerUiState(JNIEnv* env, jobject state) {
         out.display.aspectRatio = getString(env, display, "getAspectRatio");
         out.display.playbackSpeed = getFloat(env, display, "getPlaybackSpeed", 1.0f);
         out.display.enhanceVideo = getBoolean(env, display, "getEnhanceVideo");
+        out.display.hdrVideo = getBoolean(env, display, "getHdrVideo");
         out.display.brightness = getFloat(env, display, "getBrightness", 1.0f);
         env->DeleteLocalRef(display);
     }
@@ -394,6 +395,163 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetPlayerUiState(
         env->ExceptionDescribe();
         env->ExceptionClear();
     }
+}
+
+jobjectArray toJavaStringArray(JNIEnv* env, const std::vector<std::string>& values) {
+    if (env == nullptr) return nullptr;
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (stringClass == nullptr) return nullptr;
+    jobjectArray result = env->NewObjectArray(
+        static_cast<jsize>(values.size()),
+        stringClass,
+        nullptr
+    );
+    for (jsize index = 0; index < static_cast<jsize>(values.size()); ++index) {
+        jstring value = env->NewStringUTF(values[static_cast<size_t>(index)].c_str());
+        env->SetObjectArrayElement(result, index, value);
+        env->DeleteLocalRef(value);
+    }
+    env->DeleteLocalRef(stringClass);
+    return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeStartFfmpegVideoSource(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jstring uri,
+    jlong startPositionMs
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return;
+    app->startFfmpegVideoSource(toString(env, uri), static_cast<int64_t>(startPositionMs));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeStopFfmpegVideoSource(
+    JNIEnv*,
+    jobject,
+    jlong handle
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return;
+    app->stopFfmpegVideoSource();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetFfmpegPlaybackState(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean playing,
+    jlong positionMs,
+    jboolean forceSeek
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return;
+    app->setFfmpegPlaybackState(
+        playing == JNI_TRUE,
+        static_cast<int64_t>(positionMs),
+        forceSeek == JNI_TRUE
+    );
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeGetFfmpegPlaybackState(
+    JNIEnv* env,
+    jobject,
+    jlong handle
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (env == nullptr || app == nullptr) return nullptr;
+    const FfmpegPlaybackSnapshot state = app->ffmpegPlaybackSnapshot();
+    const jlong values[] = {
+        state.running ? 1 : 0,
+        state.playing ? 1 : 0,
+        state.buffering ? 1 : 0,
+        state.hdr ? 1 : 0,
+        state.audioActive ? 1 : 0,
+        static_cast<jlong>(state.positionMs),
+        static_cast<jlong>(state.durationMs),
+        static_cast<jlong>(state.bufferedPositionMs),
+        static_cast<jlong>(state.width),
+        static_cast<jlong>(state.height),
+        static_cast<jlong>(state.selectedAudioStream)
+    };
+    jlongArray result = env->NewLongArray(static_cast<jsize>(std::size(values)));
+    if (result != nullptr) {
+        env->SetLongArrayRegion(result, 0, static_cast<jsize>(std::size(values)), values);
+    }
+    return result;
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeGetFfmpegAudioTrackIds(
+    JNIEnv* env,
+    jobject,
+    jlong handle
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return nullptr;
+    const auto tracks = app->ffmpegAudioTracks();
+    std::vector<std::string> values;
+    values.reserve(tracks.size());
+    for (const auto& track : tracks) values.push_back(track.id);
+    return toJavaStringArray(env, values);
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeGetFfmpegAudioTrackTitles(
+    JNIEnv* env,
+    jobject,
+    jlong handle
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return nullptr;
+    const auto tracks = app->ffmpegAudioTracks();
+    std::vector<std::string> values;
+    values.reserve(tracks.size());
+    for (const auto& track : tracks) values.push_back(track.title);
+    return toJavaStringArray(env, values);
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeGetFfmpegAudioTrackSubtitles(
+    JNIEnv* env,
+    jobject,
+    jlong handle
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return nullptr;
+    const auto tracks = app->ffmpegAudioTracks();
+    std::vector<std::string> values;
+    values.reserve(tracks.size());
+    for (const auto& track : tracks) values.push_back(track.subtitle);
+    return toJavaStringArray(env, values);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSelectFfmpegAudioTrack(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jstring trackId
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app == nullptr) return JNI_FALSE;
+    return app->selectFfmpegAudioTrack(toString(env, trackId)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetFfmpegMuted(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean muted
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app != nullptr) app->setFfmpegMuted(muted == JNI_TRUE);
 }
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeDestroy(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativeDestroy called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (!app) return; app->destroy(); delete app; }

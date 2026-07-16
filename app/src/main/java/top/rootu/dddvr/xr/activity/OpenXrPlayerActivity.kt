@@ -2,6 +2,7 @@ package top.rootu.dddvr.xr.activity
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -10,11 +11,9 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.Surface
 import android.view.WindowManager
-import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
-import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import top.rootu.dddvr.core.playback.PlaybackSession
 import top.rootu.dddvr.logic.TrackLogic
@@ -76,6 +75,12 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var aspectRatio = "Оригинал"
     private var playbackSpeed = 1.0f
     private var enhanceVideo = false
+    private var currentVideoIsHdr = false
+    private var currentVideoUseFfmpeg = false
+    private var ffmpegVideoPipelineEnabled = false
+    private var ffmpegVideoStartAttempt = 0
+    private var lastNativeVideoWidth = 0
+    private var lastNativeVideoHeight = 0
     private var spatialAudio = false
     private var subtitlesEnabled = false
     private var xrStartAttempt = 0
@@ -113,6 +118,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            window.colorMode = ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setTurnScreenOn(true)
             setShowWhenLocked(true)
@@ -129,6 +137,13 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         playbackRequest = request
 
         smokeOnly = intent?.getBooleanExtra("openxr_smoke_only", false) == true || request == null
+        ffmpegVideoPipelineEnabled = !smokeOnly
+        if (intent?.getBooleanExtra("dddvr_debug_open_audio_panel", false) == true) {
+            activeModal = OpenXrModal.SETTINGS
+            activeSettingsTab = OpenXrSettingsTab.AUDIO
+            openXrUiVisible = true
+            Log.i(TAG, "XR_DEBUG_OPEN_AUDIO_PANEL")
+        }
         Log.i(TAG, "OpenXrPlayerActivity smokeOnly=$smokeOnly")
 
         if (parsedRequest != null) {
@@ -258,7 +273,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             }
             VrKeyAction.PLAY -> {
                 if (!smokeOnly && playerInitialized) {
-                    playbackSession.play()
+                    val state = bridge.getFfmpegPlaybackState()
+                    bridge.setFfmpegPlaybackState(true, state.positionMs)
                     openXrUiVisible = true
                     updateOpenXrUiState("key_play")
                 }
@@ -266,7 +282,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             }
             VrKeyAction.PAUSE -> {
                 if (!smokeOnly && playerInitialized) {
-                    playbackSession.pause()
+                    val state = bridge.getFfmpegPlaybackState()
+                    bridge.setFfmpegPlaybackState(false, state.positionMs)
                     openXrUiVisible = true
                     updateOpenXrUiState("key_pause")
                 }
@@ -356,28 +373,27 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         xrStartScheduled = false
         playerStartScheduled = false
         activeSurface?.let { surface ->
-            if (!smokeOnly && playerInitialized) {
-                runCatching { playbackSession.clearSurface(surface) }
-                    .onFailure { Log.e(TAG, "Unable to clear playback surface", it) }
-            }
             activeSurface = null
         }
         if (::bridge.isInitialized) {
+            if (currentVideoUseFfmpeg) {
+                runCatching { bridge.stopFfmpegVideoSource() }
+                    .onFailure { Log.e(TAG, "Unable to stop FFmpeg video source", it) }
+            }
             runCatching { bridge.destroy() }
                 .onFailure { Log.e(TAG, "Unable to destroy OpenXR bridge", it) }
         }
+        currentVideoUseFfmpeg = false
         if (playerInitialized) {
-            playbackSession.release()
             playerInitialized = false
         }
         super.onDestroy()
     }
 
     override fun onVideoSurfaceReady(surface: Surface) {
-        if (!smokeOnly && playerInitialized) activeSurface?.let { playbackSession.clearSurface(it) }
         activeSurface = surface
-        if (!smokeOnly && playerInitialized) playbackSession.attachSurface(surface)
-        Log.i(TAG, "XR_VIDEO_SURFACE_READY surface=$surface playerInitialized=$playerInitialized")
+        Log.i(TAG, "XR_VIDEO_SURFACE_HELD_FOR_FFMPEG surface=$surface playerInitialized=$playerInitialized")
+        Log.i(TAG, "XR_VIDEO_SURFACE_READY surface=$surface playerInitialized=$playerInitialized ffmpegVideo=$ffmpegVideoPipelineEnabled")
         OpenXrDebugOverlay.logSurfaceAttached(isAttached = true)
     }
 
@@ -480,27 +496,17 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
         Log.i(TAG, "PLAYER_START_BEGIN reason=$reason")
-        playerManager = PlayerManager(this, openXrPlayerListener)
-        playerManager.onPlayerCreated = {
-            Log.i(TAG, "XR_PLAYER_CREATED hasSurface=${activeSurface != null}")
-            it.volume = 1f
-            activeSurface?.let { surface -> playbackSession.attachSurface(surface) }
-            updateOpenXrUiState("player_created")
-        }
-        playerManager.onVideoFormatChanged = { format -> onVideoFormatChanged(format) }
-        playerManager.onAudioOutputFormatChanged = { info -> Log.i(TAG, "XR_AUDIO_FORMAT $info") }
-        playerManager.onMetadataAvailable = { updateAudioTrackOptions("metadata_available") }
-        playbackSession = PlaybackSession(playerManager)
+        ffmpegVideoPipelineEnabled = true
         playerInitialized = true
-        playerManager.loadPlaylist(
-            listOf(MediaItem(uri = request.uri, title = request.title, startPositionMs = request.startPositionMs)),
-            0,
-            request.startPositionMs
+        requestFfmpegVideoStart(
+            request = request,
+            startMs = request.startPositionMs,
+            reason = "player_start",
+            forceRestart = false
         )
-        activeSurface?.let { playbackSession.attachSurface(it) }
         updateAudioTrackOptions("player_start")
         updateOpenXrUiState("player_start_end")
-        Log.i(TAG, "PLAYER_START_END")
+        Log.i(TAG, "PLAYER_START_END backend=ffmpeg_only exoCreated=false")
     }
 
     private fun recoverFromSourceError(error: PlaybackException): Boolean {
@@ -531,7 +537,11 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 retryPlayer.prepare()
                 retryPlayer.playWhenReady = true
                 retryPlayer.play()
-                activeSurface?.let { playbackSession.attachSurface(it) }
+                if (ffmpegVideoPipelineEnabled) {
+                    playerManager.setVideoTrackDisabled(true, "source_error_retry")
+                } else {
+                    activeSurface?.let { playbackSession.attachSurface(it) }
+                }
                 updateOpenXrUiState("source_error_retry")
                 Log.i(TAG, "XR_SOURCE_ERROR_RETRY_START attempt=$sourceErrorRetryCount pos=$retryPosition")
             }.onFailure {
@@ -551,11 +561,12 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     private fun pausePlaybackForFocusLoss(reason: String) {
         if (smokeOnly || !playerInitialized) return
-        if (playbackSession.isPlaying || playbackSession.wantsToPlay) {
+        val state = bridge.getFfmpegPlaybackState()
+        if (state.playing) {
             resumePlaybackAfterFocusLoss = true
-            playbackSession.pause()
+            bridge.setFfmpegPlaybackState(false, state.positionMs)
             updateOpenXrUiState("focus_loss_pause")
-            Log.i(TAG, "PLAYER_PAUSED_FOR_XR_FOCUS_LOSS reason=$reason position=${playbackSession.currentPositionMs}")
+            Log.i(TAG, "PLAYER_PAUSED_FOR_XR_FOCUS_LOSS reason=$reason position=${state.positionMs}")
         } else {
             resumePlaybackAfterFocusLoss = false
             Log.i(TAG, "PLAYER_PAUSE_FOR_XR_FOCUS_LOSS_SKIPPED notPlaying reason=$reason")
@@ -563,7 +574,9 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     }
 
     private fun isForegroundForPlayback(): Boolean {
-        return resumed && (topResumed || hasWindowFocus)
+        // Pico/OpenXR activities can render after Android reports no top/focus window.
+        // Once the OpenXR session is started, resumed is the reliable playback gate.
+        return resumed && (topResumed || hasWindowFocus || initialized)
     }
 
     private fun resumePlaybackIfForeground(reason: String) {
@@ -573,50 +586,198 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             return
         }
         resumePlaybackAfterFocusLoss = false
-        playbackSession.play()
+        val state = bridge.getFfmpegPlaybackState()
+        bridge.setFfmpegPlaybackState(true, state.positionMs)
         updateOpenXrUiState("focus_return_play")
-        Log.i(TAG, "PLAYER_RESUMED_AFTER_XR_FOCUS_LOSS reason=$reason position=${playbackSession.currentPositionMs}")
+        Log.i(TAG, "PLAYER_RESUMED_AFTER_XR_FOCUS_LOSS reason=$reason position=${state.positionMs}")
     }
 
     private fun onVideoFormatChanged(format: Format) {
         val width = format.width
         val height = format.height
         if (width <= 0 || height <= 0) return
-        val hdr = MediaFormatHelper.getHdrInfo(format).ifBlank { "SDR" }
+        val hdrInfo = MediaFormatHelper.getHdrInfo(format)
+        currentVideoIsHdr = hdrInfo.isNotBlank()
+        val hdr = hdrInfo.ifBlank { "SDR" }
         val codec = MediaFormatHelper.getShortVideoCodecName(format).ifBlank { format.sampleMimeType.orEmpty() }
         Log.i(
             TAG,
-            "XR_VIDEO_FORMAT width=$width height=$height codec=$codec hdr=$hdr sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate}"
+            "XR_VIDEO_FORMAT width=$width height=$height codec=$codec hdr=$hdr autoEnhance=$currentVideoIsHdr sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate}"
         )
         bridge.setVideoSize(width, height)
+        updateFfmpegVideoBackend(format, width, height, "video_format")
+        updateOpenXrUiState("video_format")
+    }
+
+    private fun updateFfmpegVideoBackend(format: Format, width: Int, height: Int, reason: String) {
+        if (smokeOnly || !playerInitialized || !::bridge.isInitialized) return
+        val request = playbackRequest ?: return
+        val sampleMime = format.sampleMimeType.orEmpty()
+        val codecs = format.codecs.orEmpty()
+        val isDolbyVision = sampleMime == androidx.media3.common.MimeTypes.VIDEO_DOLBY_VISION ||
+            codecs.startsWith("dvh1", ignoreCase = true) ||
+            codecs.startsWith("dvhe", ignoreCase = true)
+        val isUhd = width >= 3840 || height >= 2160
+        val wouldUseSoftwareFfmpeg =
+            currentVideoIsHdr || isDolbyVision || isUhd || requestLikelyNeedsFfmpeg(request)
+        val shouldUseFfmpeg = ffmpegVideoPipelineEnabled
+        if (shouldUseFfmpeg) {
+            playerManager.setVideoTrackDisabled(true, "video_format_ffmpeg")
+            val startMs = if (::playbackSession.isInitialized) {
+                playbackSession.currentPositionMs
+            } else {
+                request.startPositionMs
+            }.coerceAtLeast(0L)
+            requestFfmpegVideoStart(
+                request = request,
+                startMs = startMs,
+                reason = reason,
+                forceRestart = false
+            )
+            Log.i(
+                TAG,
+                "XR_FFMPEG_VIDEO_BACKEND_REQUEST reason=$reason width=$width height=$height " +
+                    "hdr=$currentVideoIsHdr dovi=$isDolbyVision uhd=$isUhd heuristic=$wouldUseSoftwareFfmpeg " +
+                    "startMs=$startMs uri=${request.uri}"
+            )
+        } else if (currentVideoUseFfmpeg) {
+            currentVideoUseFfmpeg = false
+            ffmpegVideoStartAttempt = 0
+            bridge.stopFfmpegVideoSource()
+            Log.i(TAG, "XR_FFMPEG_VIDEO_BACKEND_STOP reason=$reason width=$width height=$height")
+        } else if (wouldUseSoftwareFfmpeg) {
+            Log.i(
+                TAG,
+                "XR_FFMPEG_VIDEO_BACKEND_SKIPPED reason=$reason ffmpegPipeline=false " +
+                    "width=$width height=$height hdr=$currentVideoIsHdr dovi=$isDolbyVision uhd=$isUhd " +
+                    "usingHardwarePlayer=true"
+            )
+        }
+    }
+
+    private fun startFfmpegVideoBackendFromRequestIfNeeded(request: VrPlaybackRequest, reason: String) {
+        if (smokeOnly || !playerInitialized || !::bridge.isInitialized || currentVideoUseFfmpeg) return
+        if (!ffmpegVideoPipelineEnabled) return
+        if (!requestLikelyNeedsFfmpeg(request)) return
+
+        val startMs = request.startPositionMs.coerceAtLeast(0L)
+        currentVideoIsHdr = currentVideoIsHdr || requestLooksHdr(request)
+        requestFfmpegVideoStart(
+            request = request,
+            startMs = startMs,
+            reason = reason,
+            forceRestart = false
+        )
+        Log.i(
+            TAG,
+            "XR_FFMPEG_VIDEO_BACKEND_REQUEST reason=$reason source=request_heuristic " +
+                "hdrByName=${requestLooksHdr(request)} startMs=$startMs uri=${request.uri}"
+        )
+    }
+
+    private fun requestFfmpegVideoStart(
+        request: VrPlaybackRequest,
+        startMs: Long,
+        reason: String,
+        forceRestart: Boolean
+    ) {
+        if (smokeOnly || !playerInitialized || !::bridge.isInitialized) return
+        if (currentVideoUseFfmpeg && !forceRestart) {
+            syncFfmpegVideoPlayback("refresh_$reason")
+            return
+        }
+
+        currentVideoUseFfmpeg = true
+        ffmpegVideoStartAttempt += 1
+        bridge.startFfmpegVideoSource(request.uri.toString(), startMs.coerceAtLeast(0L))
+        bridge.setFfmpegPlaybackState(true, startMs.coerceAtLeast(0L))
+        Log.i(
+            TAG,
+            "XR_FFMPEG_VIDEO_START_REQUEST reason=$reason forceRestart=$forceRestart " +
+                "attempt=$ffmpegVideoStartAttempt startMs=$startMs uri=${request.uri}"
+        )
+
+        if (!forceRestart && ffmpegVideoStartAttempt < MAX_FFMPEG_VIDEO_START_ATTEMPTS) {
+            mainHandler.postDelayed({
+                if (destroyed || smokeOnly || !playerInitialized || !currentVideoUseFfmpeg) return@postDelayed
+                syncFfmpegVideoPlayback("retry_sync_$reason")
+            }, FFMPEG_VIDEO_START_RETRY_DELAY_MS)
+        }
+    }
+
+    private fun requestLooksHdr(request: VrPlaybackRequest): Boolean {
+        val marker = "${request.uri} ${request.title.orEmpty()}".lowercase()
+        return marker.contains("hdr") ||
+            marker.contains("hdr10") ||
+            marker.contains("dolby") ||
+            marker.contains("dovi") ||
+            marker.contains("dv.")
+    }
+
+    private fun requestLikelyNeedsFfmpeg(request: VrPlaybackRequest): Boolean {
+        val marker = "${request.uri} ${request.title.orEmpty()}".lowercase()
+        return requestLooksHdr(request) ||
+            marker.contains("2160p") ||
+            marker.contains("uhd") ||
+            marker.contains("4k") ||
+            marker.contains("x265") ||
+            marker.contains("h265") ||
+            marker.contains("hevc")
+    }
+
+    private fun syncFfmpegVideoPlayback(reason: String, forceSeek: Boolean = false) {
+        if (!currentVideoUseFfmpeg || smokeOnly || !playerInitialized || !::bridge.isInitialized) {
+            return
+        }
+        val state = bridge.getFfmpegPlaybackState()
+        if (forceSeek) {
+            bridge.setFfmpegPlaybackState(state.playing, state.positionMs, forceSeek = true)
+        }
+        if (reason != "tick") {
+            Log.i(
+                TAG,
+                "XR_FFMPEG_VIDEO_SYNC reason=$reason playing=${state.playing} positionMs=${state.positionMs} forceSeek=$forceSeek"
+            )
+        }
     }
 
     private fun updateOpenXrUiState(reason: String) {
         if (!::bridge.isInitialized) return
-        val playing = !smokeOnly &&
-            playerInitialized &&
-            (playbackSession.isPlaying || playbackSession.wantsToPlay)
-        val buffering = !smokeOnly && playerInitialized && playbackSession.isBuffering
-        val positionMs = if (!smokeOnly && playerInitialized) playbackSession.currentPositionMs else 0L
-        val durationMs = if (!smokeOnly && playerInitialized) playbackSession.durationMs.coerceAtLeast(0L) else 0L
-        val bufferedPositionMs = if (!smokeOnly && playerInitialized) playbackSession.bufferedPositionMs.coerceAtLeast(0L) else 0L
+        val playback = if (!smokeOnly && playerInitialized) {
+            bridge.getFfmpegPlaybackState()
+        } else {
+            top.rootu.dddvr.xr.ui.OpenXrFfmpegPlaybackState()
+        }
+        val playing = playback.playing
+        val buffering = playback.buffering
+        val positionMs = playback.positionMs
+        val durationMs = playback.durationMs
+        val bufferedPositionMs = playback.bufferedPositionMs
+        currentVideoIsHdr = playback.hdr || currentVideoIsHdr
+        if (playback.width > 0 && playback.height > 0 &&
+            (playback.width != lastNativeVideoWidth || playback.height != lastNativeVideoHeight)) {
+            lastNativeVideoWidth = playback.width
+            lastNativeVideoHeight = playback.height
+            bridge.setVideoSize(playback.width, playback.height)
+            Log.i(TAG, "XR_FFMPEG_VIDEO_SIZE width=${playback.width} height=${playback.height}")
+        }
         val title = playbackRequest?.title?.takeIf { it.isNotBlank() } ?: "DDD-VR OpenXR Player"
-        val audioLabels = audioOptions.map { TrackLogic.buildTrackLabel(it, this) }.toTypedArray()
-        val selectedAudioLabel = audioLabels.getOrNull(selectedAudioTrackIndex).orEmpty()
-        if (!smokeOnly && playerInitialized && ::playbackSession.isInitialized) {
-            playbackSpeed = playbackSession.playbackSpeed
-        }
-        val audioTrackRows = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-            playerManager.getAudioTrackRows()
+        val audioTrackRows = if (!smokeOnly && playerInitialized) {
+            bridge.getFfmpegAudioTracks()
         } else {
             emptyList()
         }
-        val subtitleTrackRows = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-            playerManager.getSubtitleTrackRows()
-        } else {
-            emptyList()
+        val subtitleTrackRows = emptyList<top.rootu.dddvr.xr.ui.OpenXrTrackRow>()
+        subtitlesEnabled = false
+        val selectedAudioLabel = audioTrackRows.firstOrNull { it.selected }?.title.orEmpty()
+        val currentVideoIs3d = playbackConfig.stereoMode != StereoInputMode.MONO
+        val effectiveEnhanceVideo = enhanceVideo || currentVideoIsHdr || currentVideoIs3d
+        val effectiveBrightness = when {
+            currentVideoIsHdr -> 0.86f
+            currentVideoIs3d -> 0.58f
+            enhanceVideo -> 0.96f
+            else -> 1.0f
         }
-        subtitlesEnabled = subtitleTrackRows.any { it.selected && !it.id.endsWith(":0") }
         val state = OpenXrPlayerUiState(
             visible = openXrUiVisible,
             pinned = activeModal != OpenXrModal.NONE,
@@ -628,24 +789,17 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             bufferedPositionMs = bufferedPositionMs,
             title = title,
             projectionModeLabel = projectionModeLabel(),
-            audioTrackLabel = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-                playerManager.currentAudioTrackLabel()
-            } else {
-                selectedAudioLabel
-            },
-            subtitleTrackLabel = if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-                playerManager.currentSubtitleTrackLabel()
-            } else {
-                ""
-            },
+            audioTrackLabel = selectedAudioLabel,
+            subtitleTrackLabel = "",
             activeModal = activeModal.nativeCode,
             activeSettingsTab = activeSettingsTab.nativeCode,
             hoverTarget = 0,
             display = OpenXrDisplayUiState(
                 aspectRatio = aspectRatio,
                 playbackSpeed = playbackSpeed,
-                enhanceVideo = enhanceVideo,
-                brightness = 1.0f
+                enhanceVideo = effectiveEnhanceVideo,
+                hdrVideo = currentVideoIsHdr,
+                brightness = effectiveBrightness
             ),
             subtitles = OpenXrSubtitlesUiState(
                 enabled = subtitlesEnabled,
@@ -668,23 +822,22 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 "XR_UI_STATE reason=$reason visible=$openXrUiVisible positionMs=$positionMs " +
                     "durationMs=$durationMs bufferedMs=$bufferedPositionMs playing=$playing " +
                     "buffering=$buffering modal=$activeModal tab=$activeSettingsTab " +
-                    "audioTracks=${audioTrackRows.size.coerceAtLeast(audioLabels.size)} " +
+                    "enhanceVideo=$effectiveEnhanceVideo currentVideoIsHdr=$currentVideoIsHdr currentVideoIs3d=$currentVideoIs3d brightness=$effectiveBrightness " +
+                    "audioRows=${audioTrackRows.size} nativeAudio=${playback.audioActive} " +
                     "subtitleTracks=${subtitleTrackRows.size} selectedAudio=$selectedAudioTrackIndex"
             )
         }
     }
 
     private fun updateAudioTrackOptions(reason: String) {
-        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
-        val player = playerManager.exoPlayer ?: return
-        val (tracks, selectedIndex) = TrackLogic.extractAudioTracks(
-            player.currentTracks,
-            playerManager.getTrackMetadata()
-        )
-        audioOptions = tracks
-        selectedAudioTrackIndex = selectedIndex.coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
-        subtitlesEnabled = playerManager.getSubtitleTrackRows().any { it.selected && !it.id.endsWith(":0") }
-        Log.i(TAG, "XR_AUDIO_TRACKS_UPDATE reason=$reason count=${audioOptions.size} selected=$selectedAudioTrackIndex subtitlesEnabled=$subtitlesEnabled")
+        if (smokeOnly || !playerInitialized || !::bridge.isInitialized) return
+        val audioRows = bridge.getFfmpegAudioTracks()
+        selectedAudioTrackIndex = audioRows.indexOfFirst { it.selected }.coerceAtLeast(0)
+        val audioRowsLog = audioRows.joinToString {
+            "${it.id}|title=${it.title}|sub=${it.subtitle}|selected=${it.selected}|enabled=${it.enabled}"
+        }
+        Log.i(TAG, "XR_TRACK_ROWS reason=$reason audio=$audioRowsLog")
+        Log.i(TAG, "XR_AUDIO_TRACKS_UPDATE reason=$reason count=${audioRows.size} selected=$selectedAudioTrackIndex backend=ffmpeg")
         updateOpenXrUiState("audio_tracks_$reason")
     }
 
@@ -737,33 +890,24 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         }
     }
 
-    private fun applyAudioTrackSelection(index: Int) {
-        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
-        if (index !in audioOptions.indices) {
-            Log.w(TAG, "XR_AUDIO_TRACK_SELECT_IGNORED invalid=$index count=${audioOptions.size}")
-            return
+    private fun applyAudioTrackSelection(index: Int): Boolean {
+        if (smokeOnly || !playerInitialized || !::bridge.isInitialized) return false
+        val rows = bridge.getFfmpegAudioTracks()
+        if (index !in rows.indices) {
+            Log.w(TAG, "XR_AUDIO_TRACK_SELECT_IGNORED invalid=$index count=${rows.size}")
+            return false
         }
-        val option = audioOptions[index]
-        val player = playerManager.exoPlayer ?: return
-        val builder = player.trackSelectionParameters.buildUpon()
-        if (option.isOff) {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-        } else {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-            option.group?.let { group ->
-                builder.setOverrideForType(
-                    TrackSelectionOverride(
-                        group.mediaTrackGroup,
-                        option.trackIndex
-                    )
-                )
-            }
+        val option = rows[index]
+        val applied = bridge.selectFfmpegAudioTrack(option.id)
+        if (!applied) {
+            Log.w(TAG, "XR_AUDIO_TRACK_SELECT_FAILED index=$index id=${option.id}")
+            return false
         }
-        player.trackSelectionParameters = builder.build()
         selectedAudioTrackIndex = index
         openXrUiVisible = true
-        Log.i(TAG, "XR_AUDIO_TRACK_SELECTED index=$index label=${TrackLogic.buildTrackLabel(option, this)}")
-        updateOpenXrUiState("audio_track_selected")
+        Log.i(TAG, "XR_AUDIO_TRACK_SELECTED index=$index id=${option.id} label=${option.title} backend=ffmpeg")
+        updateAudioTrackOptions("audio_track_selected")
+        return true
     }
 
     private fun saveLastPlaybackRequest(request: VrPlaybackRequest) {
@@ -818,29 +962,33 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
 
     override fun onPlayPause() {
         if (!smokeOnly && playerInitialized) {
-            if (playbackSession.isPlaying || playbackSession.wantsToPlay) {
-                playbackSession.pause()
-            } else {
-                playbackSession.play()
-            }
+            val state = bridge.getFfmpegPlaybackState()
+            bridge.setFfmpegPlaybackState(!state.playing, state.positionMs)
             openXrUiVisible = true
             updateOpenXrUiState("input_play_pause")
         }
     }
     override fun onSeekBy(deltaMs: Long) {
         if (!smokeOnly && playerInitialized) {
-            playbackSession.seekBy(deltaMs)
+            val state = bridge.getFfmpegPlaybackState()
+            val target = (state.positionMs + deltaMs).coerceIn(0L, state.durationMs.coerceAtLeast(0L))
+            bridge.setFfmpegPlaybackState(state.playing, target, forceSeek = true)
             openXrUiVisible = true
             updateOpenXrUiState("input_seek")
         }
     }
     override fun onSeekToProgress(progressPermille: Int) {
         if (!smokeOnly && playerInitialized) {
-            val duration = playbackSession.durationMs
+            val state = bridge.getFfmpegPlaybackState()
+            val duration = state.durationMs
             if (duration <= 0L) return
             val positionMs = (duration * progressPermille.coerceIn(0, 1000)) / 1000L
-            playbackSession.seekTo(positionMs)
             openXrUiVisible = true
+            bridge.setFfmpegPlaybackState(
+                state.playing,
+                positionMs,
+                forceSeek = true
+            )
             updateOpenXrUiState("input_timeline_seek")
             Log.i(TAG, "XR_TIMELINE_SEEK_APPLIED progress=$progressPermille positionMs=$positionMs durationMs=$duration")
         }
@@ -858,7 +1006,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             }
             OpenXrPlayerUiAction.ToggleVolume -> {
                 muted = !muted
-                if (!smokeOnly && playerInitialized) playbackSession.setMuted(muted)
+                if (!smokeOnly && playerInitialized) bridge.setFfmpegMuted(muted)
                 openXrUiVisible = true
             }
             OpenXrPlayerUiAction.ToggleProjectionMenu -> {
@@ -877,21 +1025,20 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SelectAudioTrack -> {
-                if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-                    if (action.id.startsWith("legacy_audio:")) {
-                        action.id.removePrefix("legacy_audio:").toIntOrNull()?.let(::applyAudioTrackSelection)
+                if (!smokeOnly && playerInitialized) {
+                    val applied = if (action.id.startsWith("legacy_audio:")) {
+                        action.id.removePrefix("legacy_audio:").toIntOrNull()?.let(::applyAudioTrackSelection) ?: false
                     } else {
-                        playerManager.selectAudioTrack(action.id)
-                        updateAudioTrackOptions("ui_audio_select")
+                        bridge.selectFfmpegAudioTrack(action.id).also {
+                            if (it) updateAudioTrackOptions("ui_audio_select")
+                        }
                     }
+                    Log.i(TAG, "XR_AUDIO_TRACK_SELECT_REQUEST id=${action.id} applied=$applied")
                 }
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SelectSubtitleTrack -> {
-                if (!smokeOnly && playerInitialized && ::playerManager.isInitialized) {
-                    playerManager.selectSubtitleTrack(action.id)
-                    subtitlesEnabled = !action.id.endsWith(":0")
-                }
+                Log.i(TAG, "XR_SUBTITLE_TRACK_SELECT_REQUEST id=${action.id} applied=false backend=ffmpeg_pending")
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SelectPlaylistItem -> {
@@ -904,8 +1051,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SetPlaybackSpeed -> {
-                playbackSpeed = action.value.coerceIn(0.25f, 3.0f)
-                if (!smokeOnly && playerInitialized) playbackSession.setPlaybackSpeed(playbackSpeed)
+                playbackSpeed = 1.0f
+                Log.w(TAG, "XR_PLAYBACK_SPEED_IGNORED requested=${action.value} backend=ffmpeg")
                 openXrUiVisible = true
             }
             OpenXrPlayerUiAction.ToggleEnhanceVideo -> {
@@ -928,22 +1075,15 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     }
 
     private fun setSubtitlesEnabled(enabled: Boolean) {
-        subtitlesEnabled = enabled
-        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
-        if (enabled) {
-            playerManager.enableFirstSubtitleTrack()
-        } else {
-            playerManager.disableSubtitles()
-        }
+        subtitlesEnabled = false
+        Log.i(TAG, "XR_SUBTITLES_TOGGLE enabled=$enabled applied=false backend=ffmpeg_pending")
     }
 
     private fun selectPlaylistItem(id: String) {
-        if (smokeOnly || !playerInitialized || !::playerManager.isInitialized) return
-        val player = playerManager.exoPlayer ?: return
         val index = id.removePrefix("playlist:").toIntOrNull() ?: return
-        if (index !in 0 until player.mediaItemCount) return
-        player.seekToDefaultPosition(index)
-        playbackSession.play()
+        if (index != 0 || smokeOnly || !playerInitialized) return
+        val state = bridge.getFfmpegPlaybackState()
+        bridge.setFfmpegPlaybackState(true, 0L, forceSeek = true)
         Log.i(TAG, "XR_PLAYLIST_ITEM_SELECTED index=$index")
     }
     override fun onRecenter() { OpenXrDebugOverlay.logSessionState("recenter_request") }
@@ -960,6 +1100,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         private const val XR_RETRY_DELAY_MS = 500L
         private const val PLAYER_START_DELAY_MS = 200L
         private const val UI_STATE_UPDATE_MS = 250L
+        private const val FFMPEG_VIDEO_START_RETRY_DELAY_MS = 12_000L
+        private const val MAX_FFMPEG_VIDEO_START_ATTEMPTS = 3
         private const val MAX_NOT_RESUMED_RETRIES = 5
         private const val MAX_SOURCE_ERROR_RETRIES = 20
         private const val SOURCE_ERROR_RETRY_DELAY_MS = 500L

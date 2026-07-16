@@ -3,6 +3,7 @@
 #include "OpenXrPlatform.h"
 
 #include <string>
+#include <vector>
 
 class OpenXrSession {
 public:
@@ -14,6 +15,7 @@ public:
     bool end();
     void pollEvents();
     void shutdown();
+    bool setHdrColorSpace(bool hdrVideo);
     XrSessionState currentState() const { return state_; }
 
     bool runtimeAvailable() const { return runtimeAvailable_; }
@@ -28,6 +30,9 @@ public:
 
 private:
     bool hasExtension(const char* name);
+    void initializeColorSpaceExtension();
+    bool supportsColorSpace(XrColorSpaceFB colorSpace) const;
+    bool setColorSpaceFromPreference(const std::vector<XrColorSpaceFB>& preference, const char* reason);
 
     bool runtimeAvailable_ = false;
     std::string lastError_;
@@ -42,4 +47,10 @@ private:
     EGLSurface eglSurface_{EGL_NO_SURFACE};
     uint32_t recWidth_ = 2048;
     uint32_t recHeight_ = 2048;
+    bool fbColorSpaceEnabled_ = false;
+    bool fbColorSpaceReady_ = false;
+    PFN_xrEnumerateColorSpacesFB xrEnumerateColorSpacesFB_ = nullptr;
+    PFN_xrSetColorSpaceFB xrSetColorSpaceFB_ = nullptr;
+    std::vector<XrColorSpaceFB> supportedColorSpaces_;
+    XrColorSpaceFB currentColorSpace_ = XR_COLOR_SPACE_MAX_ENUM_FB;
 };

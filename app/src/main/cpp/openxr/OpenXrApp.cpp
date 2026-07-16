@@ -2,6 +2,7 @@
 #include "OpenXrLoader.h"
 #include "../util/XrLog.h"
 #include <GLES3/gl3.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -25,6 +26,9 @@ int hoverPriority(CinemaUiHoverTarget target) {
     }
 }
 #endif
+
+constexpr auto kFfmpegVideoMinUploadInterval = std::chrono::milliseconds(32);
+constexpr GLenum kFramebufferSrgbExt = 0x8DB9;
 }
 
 OpenXrApp::~OpenXrApp() {
@@ -136,7 +140,45 @@ void OpenXrApp::setUiState(
 }
 
 void OpenXrApp::setPlayerUiState(const VrPlayerUiState& state) {
+    pendingHdrColorSpaceIntent_.store(state.display.hdrVideo ? 1 : 0);
     renderer_.setPlayerUiState(state);
+}
+
+void OpenXrApp::startFfmpegVideoSource(const std::string& uri, int64_t startPositionMs) {
+    {
+        std::lock_guard<std::mutex> lock(ffmpegVideoMutex_);
+        pendingFfmpegVideoUri_ = uri;
+        pendingFfmpegVideoStartMs_ = std::max<int64_t>(0, startPositionMs);
+    }
+    pendingFfmpegStopRequest_.store(false);
+    pendingFfmpegVideoRequest_.store(true);
+    XR_LOGI("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_REQUEST_START startMs=%lld uri=%s", (long long)startPositionMs, uri.c_str());
+}
+
+void OpenXrApp::stopFfmpegVideoSource() {
+    pendingFfmpegVideoRequest_.store(false);
+    pendingFfmpegStopRequest_.store(true);
+    XR_LOGI("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_REQUEST_STOP");
+}
+
+void OpenXrApp::setFfmpegPlaybackState(bool playing, int64_t positionMs, bool forceSeek) {
+    ffmpegVideoDecoder_.setPlaybackState(playing, positionMs, forceSeek);
+}
+
+void OpenXrApp::setFfmpegMuted(bool muted) {
+    ffmpegVideoDecoder_.setMuted(muted);
+}
+
+bool OpenXrApp::selectFfmpegAudioTrack(const std::string& trackId) {
+    return ffmpegVideoDecoder_.selectAudioTrack(trackId);
+}
+
+FfmpegPlaybackSnapshot OpenXrApp::ffmpegPlaybackSnapshot() const {
+    return ffmpegVideoDecoder_.playbackSnapshot();
+}
+
+std::vector<FfmpegAudioTrackInfo> OpenXrApp::ffmpegAudioTracks() const {
+    return ffmpegVideoDecoder_.audioTracks();
 }
 
 bool OpenXrApp::initialize() { XR_LOGI("DDDVR/OpenXR", "OpenXrApp created; init deferred to render thread"); return true; }
@@ -204,6 +246,13 @@ void OpenXrApp::loop() {
     OpenXrPointerRay gripPoses[2]{};
     OpenXrPointerRay previousPointerRays[2]{};
     std::chrono::steady_clock::time_point lastPointerMotionTime{};
+    std::chrono::steady_clock::time_point lastFfmpegVideoUploadTime{};
+    auto renderStatsStart = std::chrono::steady_clock::now();
+    uint64_t renderStatsFrames = 0;
+    uint64_t renderStatsLayerFrames = 0;
+    double renderStatsCpuMs = 0.0;
+    double renderStatsMaxCpuMs = 0.0;
+    uint64_t droppedFfmpegVideoUploads = 0;
 
     while (running_) {
         if (!initialized_) {
@@ -295,6 +344,8 @@ void OpenXrApp::loop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
+        applyPendingXrColorSpaceOnRenderThread();
+        applyPendingFfmpegVideoRequestOnRenderThread();
         OpenXrFrameControls controls{};
         bool grabControlActive = false;
         if (state == XR_SESSION_STATE_FOCUSED) {
@@ -313,6 +364,7 @@ void OpenXrApp::loop() {
         }
         const bool shouldLogFrameCall = (frameCounter < 10 || frameCounter % 120 == 0);
         XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO}; XrFrameState fs{XR_TYPE_FRAME_STATE}; if (shouldLogFrameCall) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrWaitFrame"); XrResult wr = xrWaitFrame(session_.session(), &wi, &fs); if (shouldLogFrameCall || wr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrWaitFrame result=%d", wr); if (wr != XR_SUCCESS) continue;
+        const auto frameCpuStart = std::chrono::steady_clock::now();
         if (state == XR_SESSION_STATE_FOCUSED) {
             input_.locatePointerRays(session_.appSpace(), fs.predictedDisplayTime, pointerRays);
             input_.locateGripPoses(session_.appSpace(), fs.predictedDisplayTime, gripPoses);
@@ -447,9 +499,71 @@ void OpenXrApp::loop() {
         XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO}; if (shouldLogFrameCall) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrBeginFrame"); XrResult br = xrBeginFrame(session_.session(), &bi); if (shouldLogFrameCall || br != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrBeginFrame result=%d", br); if (br != XR_SUCCESS) continue;
         XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO}; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime = fs.predictedDisplayTime; li.space = session_.appSpace(); XrViewState vs{XR_TYPE_VIEW_STATE}; uint32_t count = 0; XrResult lr = xrLocateViews(session_.session(), &li, &vs, (uint32_t)views.size(), &count, views.data()); if (frameCounter < 10 || frameCounter % 120 == 0 || lr != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "xrLocateViews result=%d", lr);
         bool acquired = false; bool fboOk = false;
+        FfmpegHardwareBufferFrame ffmpegHardwareFrame{};
+        FfmpegVideoFrame ffmpegFrame{};
+        bool ffmpegVideoUpdated = false;
+        if (ffmpegVideoDecoder_.pollHardwareBufferFrame(&ffmpegHardwareFrame)) {
+            ffmpegVideoUpdated = renderer_.importFfmpegHardwareBufferFrame(
+                std::move(ffmpegHardwareFrame)
+            );
+            if (ffmpegVideoUpdated) {
+                lastFfmpegVideoUploadTime = std::chrono::steady_clock::now();
+            }
+        } else if (ffmpegVideoDecoder_.pollFrame(&ffmpegFrame)) {
+            const auto now = std::chrono::steady_clock::now();
+            const bool uploadAllowed =
+                lastFfmpegVideoUploadTime.time_since_epoch().count() == 0 ||
+                now - lastFfmpegVideoUploadTime >= kFfmpegVideoMinUploadInterval;
+            if (uploadAllowed) {
+                ffmpegVideoUpdated = renderer_.uploadFfmpegVideoFrame(ffmpegFrame);
+                if (ffmpegVideoUpdated) {
+                    lastFfmpegVideoUploadTime = now;
+                }
+            } else {
+                ++droppedFfmpegVideoUploads;
+                if (droppedFfmpegVideoUploads == 1 || droppedFfmpegVideoUploads % 120 == 0) {
+                    XR_LOGW(
+                        "DDDVR/FFmpegVideo",
+                        "FFMPEG_VIDEO_UPLOAD_DROPPED_FOR_UI count=%llu frame=%dx%d",
+                        (unsigned long long)droppedFfmpegVideoUploads,
+                        ffmpegFrame.width,
+                        ffmpegFrame.height
+                    );
+                }
+            }
+        }
         const bool videoUpdated = updateVideoSurfaceOnRenderThread();
         renderer_.setVideoFrameState(videoTransform_, videoUpdated);
-        if (lr == XR_SUCCESS && swapchain_.acquireImage()) { acquired = true; glBindFramebuffer(GL_FRAMEBUFFER, fbo); fboOk = true; for (int eye=0; eye<2; ++eye){ auto pre=glGetError(); glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(),0,eye); auto fb=glCheckFramebufferStatus(GL_FRAMEBUFFER); auto post=glGetError(); if (frameCounter < 10 || frameCounter % 120 == 0 || fb!=GL_FRAMEBUFFER_COMPLETE || post!=GL_NO_ERROR) XR_LOGI("DDDVR/OpenXRRenderer","eye=%d imageArrayIndex=%d tex=%u viewport=%dx%d swap=%dx%d fbo status=0x%x glErrPre=0x%x glErrPost=0x%x",eye,eye,swapchain_.activeColorTexture(),swapchain_.width(),swapchain_.height(),swapchain_.width(),swapchain_.height(),fb,pre,post); if (fb==GL_FRAMEBUFFER_COMPLETE && !fboOkSeen_){ XR_LOGI("DDDVR/OpenXRCheck", "FBO_OK"); fboOkSeen_=true; }
+        if (ffmpegVideoUpdated) {
+            renderer_.setVideoFrameState(nullptr, true);
+        }
+        if (lr == XR_SUCCESS && swapchain_.acquireImage()) { acquired = true; glBindFramebuffer(GL_FRAMEBUFFER, fbo); fboOk = true;
+            static int srgbWriteControlSupported = -1;
+            static bool srgbWriteControlLogged = false;
+            if (swapchain_.format() == GL_SRGB8_ALPHA8) {
+                if (srgbWriteControlSupported < 0) {
+                    const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+                    srgbWriteControlSupported = extensions != nullptr && std::strstr(extensions, "GL_EXT_sRGB_write_control") != nullptr ? 1 : 0;
+                }
+                if (srgbWriteControlSupported == 1) {
+                    const bool enabledBefore = glIsEnabled(kFramebufferSrgbExt) == GL_TRUE;
+                    glDisable(kFramebufferSrgbExt);
+                    if (!srgbWriteControlLogged) {
+                        XR_LOGI(
+                            "DDDVR/OpenXRColor",
+                            "XR_SRGB_WRITE_CONTROL extension=1 before=%d after=%d glError=0x%x",
+                            enabledBefore ? 1 : 0,
+                            glIsEnabled(kFramebufferSrgbExt) == GL_TRUE ? 1 : 0,
+                            glGetError()
+                        );
+                        srgbWriteControlLogged = true;
+                    }
+                } else if (!srgbWriteControlLogged) {
+                    XR_LOGI("DDDVR/OpenXRColor", "XR_SRGB_WRITE_CONTROL extension=0");
+                    srgbWriteControlLogged = true;
+                }
+            }
+            for (int eye=0; eye<2; ++eye){ auto pre=glGetError(); glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, swapchain_.activeColorTexture(),0,eye); auto fb=glCheckFramebufferStatus(GL_FRAMEBUFFER); auto post=glGetError(); if (frameCounter < 10 || frameCounter % 120 == 0 || fb!=GL_FRAMEBUFFER_COMPLETE || post!=GL_NO_ERROR) XR_LOGI("DDDVR/OpenXRRenderer","eye=%d imageArrayIndex=%d tex=%u viewport=%dx%d swap=%dx%d fbo status=0x%x glErrPre=0x%x glErrPost=0x%x",eye,eye,swapchain_.activeColorTexture(),swapchain_.width(),swapchain_.height(),swapchain_.width(),swapchain_.height(),fb,pre,post); if (fb==GL_FRAMEBUFFER_COMPLETE && !fboOkSeen_){ XR_LOGI("DDDVR/OpenXRCheck", "FBO_OK"); fboOkSeen_=true; }
             if (fb!=GL_FRAMEBUFFER_COMPLETE){ XR_LOGE("DDDVR/OpenXRCheck", "FBO_FAIL status=0x%x glErr=0x%x", fb, post); XR_LOGE("DDDVR/OpenXR","CURRENT_BLOCKER: FBO incomplete eye=%d status=0x%x glErr=0x%x",eye,fb,post); fboOk=false; break;} renderer_.renderEye(eye, swapchain_.width(), swapchain_.height(), views[eye]); } }
         XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO}; ei.displayTime = fs.predictedDisplayTime; ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; ei.layerCount = 0;
         XrCompositionLayerProjectionView pv[2]{}; XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION}; const XrCompositionLayerBaseHeader* layers[1];
@@ -459,6 +573,35 @@ void OpenXrApp::loop() {
         }
         if (shouldLogFrameCall) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_BEGIN xrEndFrame");
         XrResult er = xrEndFrame(session_.session(), &ei); if (shouldLogFrameCall || er != XR_SUCCESS) XR_LOGI("DDDVR/OpenXRRenderer", "XR_CALL_END xrEndFrame result=%d", er);
+        const auto frameCpuEnd = std::chrono::steady_clock::now();
+        const double frameCpuMs = std::chrono::duration<double, std::milli>(
+            frameCpuEnd - frameCpuStart
+        ).count();
+        renderStatsCpuMs += frameCpuMs;
+        renderStatsMaxCpuMs = std::max(renderStatsMaxCpuMs, frameCpuMs);
+        if (er == XR_SUCCESS) {
+            ++renderStatsFrames;
+            if (ei.layerCount > 0) ++renderStatsLayerFrames;
+        }
+        if (frameCpuEnd - renderStatsStart >= std::chrono::seconds(5)) {
+            const double seconds = std::chrono::duration<double>(
+                frameCpuEnd - renderStatsStart
+            ).count();
+            XR_LOGI(
+                "DDDVR/OpenXRPerf",
+                "XR_RENDER_STATS fps=%.2f submitted=%llu layerFrames=%llu avgCpuMs=%.2f maxCpuMs=%.2f videoSurfaceFpsLoggedSeparately=1",
+                seconds > 0.0 ? static_cast<double>(renderStatsFrames) / seconds : 0.0,
+                (unsigned long long)renderStatsFrames,
+                (unsigned long long)renderStatsLayerFrames,
+                renderStatsFrames > 0 ? renderStatsCpuMs / static_cast<double>(renderStatsFrames) : 0.0,
+                renderStatsMaxCpuMs
+            );
+            renderStatsStart = frameCpuEnd;
+            renderStatsFrames = 0;
+            renderStatsLayerFrames = 0;
+            renderStatsCpuMs = 0.0;
+            renderStatsMaxCpuMs = 0.0;
+        }
         if (er == XR_SUCCESS && !firstFrameSubmitted_) {
             XR_LOGI("DDDVR/OpenXRCheck", "FRAME_LOOP_OK");
             firstFrameSubmitted_ = true;
@@ -472,6 +615,8 @@ void OpenXrApp::loop() {
             (unsigned long long)beginSessionCount_, (unsigned long long)endSessionCount_,
             stoppedBySeethroughOrFocusLoss_ ? 1 : 0, (stoppedBySeethroughOrFocusLoss_ && sessionRunning_) ? 1 : 0,
             exitRequested_ ? 1 : 0, restartRequested_ ? 1 : 0);
+    renderer_.setFfmpegVideoEnabled(false);
+    ffmpegVideoDecoder_.stop();
     XR_LOGI("DDDVR/OpenXR", "swapchain destroy reason=loop exit");
     releaseVideoSurfaceOnRenderThread();
     swapchain_.destroy();
@@ -485,7 +630,7 @@ void OpenXrApp::loop() {
 void OpenXrApp::stopAndJoinThread(const char* reason){ XR_LOGI("DDDVR/OpenXR", "stopAndJoinThread reason=%s", reason); running_=false; if(thread_.joinable()) thread_.join(); sessionRunning_=false; }
 void OpenXrApp::pause(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::pause requested nonFatal=1"); androidPaused_ = true; }
 void OpenXrApp::resume(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::resume requested"); androidPaused_ = false; }
-void OpenXrApp::destroy(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::destroy requested"); stopAndJoinThread("destroy"); }
+void OpenXrApp::destroy(){ XR_LOGI("DDDVR/OpenXR", "OpenXrApp::destroy requested"); ffmpegVideoDecoder_.stop(); stopAndJoinThread("destroy"); }
 
 JNIEnv* OpenXrApp::attachCurrentThread(bool* didAttach) const {
     if (didAttach != nullptr) *didAttach = false;
@@ -604,9 +749,66 @@ void OpenXrApp::dispatchPlayerUiActionOnRenderThread(const VrPlayerPanelAction& 
         env->ExceptionClear();
         XR_LOGE("DDDVR/OpenXRInput", "XR_PLAYER_UI_ACTION_CALLBACK_FAILED type=%d", static_cast<int>(action.type));
     } else {
-        XR_LOGI("DDDVR/OpenXRInput", "XR_PLAYER_UI_ACTION_DISPATCH type=%d", static_cast<int>(action.type));
+        XR_LOGI(
+            "DDDVR/OpenXRInput",
+            "XR_PLAYER_UI_ACTION_DISPATCH type=%d int=%d float=%.3f text=%s",
+            static_cast<int>(action.type),
+            action.intValue,
+            action.floatValue,
+            action.stringValue.c_str()
+        );
     }
     detachCurrentThread(didAttach);
+}
+
+void OpenXrApp::applyPendingXrColorSpaceOnRenderThread() {
+    const int32_t intent = pendingHdrColorSpaceIntent_.load();
+    if (intent == appliedHdrColorSpaceIntent_) return;
+    const bool hdrVideo = intent != 0;
+    if (session_.setHdrColorSpace(hdrVideo)) {
+        appliedHdrColorSpaceIntent_ = intent;
+        XR_LOGI(
+            "DDDVR/OpenXRColor",
+            "XR_COLOR_SPACE_INTENT_APPLIED hdrVideo=%d intent=%d",
+            hdrVideo ? 1 : 0,
+            intent
+        );
+    }
+}
+
+void OpenXrApp::applyPendingFfmpegVideoRequestOnRenderThread() {
+    if (pendingFfmpegStopRequest_.exchange(false)) {
+        renderer_.setFfmpegVideoEnabled(false);
+        ffmpegVideoDecoder_.stop();
+        XR_LOGI("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_STOP_APPLIED");
+    }
+
+    if (!pendingFfmpegVideoRequest_.exchange(false)) return;
+
+    std::string uri;
+    int64_t startMs = 0;
+    {
+        std::lock_guard<std::mutex> lock(ffmpegVideoMutex_);
+        uri = pendingFfmpegVideoUri_;
+        startMs = pendingFfmpegVideoStartMs_;
+    }
+
+    if (uri.empty()) {
+        XR_LOGW("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_START_SKIPPED empty_uri");
+        return;
+    }
+
+    renderer_.setFfmpegVideoEnabled(false);
+    const bool started = ffmpegVideoDecoder_.start(
+        uri,
+        startMs,
+        dddvr::openxr::javaVm(),
+        videoDecoderSurfaceRef_
+    );
+    renderer_.setFfmpegVideoEnabled(started);
+    if (!started) {
+        XR_LOGE("DDDVR/FFmpegVideo", "FFMPEG_VIDEO_START_FAILED error=%s", ffmpegVideoDecoder_.lastError().c_str());
+    }
 }
 
 bool OpenXrApp::createVideoSurfaceOnRenderThread() {
@@ -650,6 +852,14 @@ bool OpenXrApp::createVideoSurfaceOnRenderThread() {
         return false;
     }
 
+    videoDecoderSurfaceRef_ = env->NewGlobalRef(surface);
+    if (videoDecoderSurfaceRef_ == nullptr) {
+        XR_LOGE("DDDVR/OpenXRVideo", "CURRENT_BLOCKER XR_VIDEO_DECODER_SURFACE_REF_FAILED");
+        env->DeleteLocalRef(surface);
+        detachCurrentThread(didAttach);
+        return false;
+    }
+
     env->CallVoidMethod(javaBridgeRef_, bridgeOnVideoSurfaceReady_, surface);
     env->DeleteLocalRef(surface);
     if (env->ExceptionCheck()) {
@@ -683,6 +893,23 @@ bool OpenXrApp::updateVideoSurfaceOnRenderThread() {
     if (updated == JNI_TRUE) {
         env->GetFloatArrayRegion(videoTransformArray_, 0, 16, videoTransform_);
         videoFrameUpdateCount_ += 1;
+        const auto now = std::chrono::steady_clock::now();
+        if (videoFrameStatsStart_.time_since_epoch().count() == 0) {
+            videoFrameStatsStart_ = now;
+            videoFrameStatsBaseCount_ = videoFrameUpdateCount_;
+        } else if (now - videoFrameStatsStart_ >= std::chrono::seconds(5)) {
+            const double seconds = std::chrono::duration<double>(now - videoFrameStatsStart_).count();
+            const uint64_t frames = videoFrameUpdateCount_ - videoFrameStatsBaseCount_;
+            XR_LOGI(
+                "DDDVR/OpenXRVideo",
+                "XR_VIDEO_SURFACE_STATS fps=%.2f frames=%llu total=%llu",
+                seconds > 0.0 ? static_cast<double>(frames) / seconds : 0.0,
+                (unsigned long long)frames,
+                (unsigned long long)videoFrameUpdateCount_
+            );
+            videoFrameStatsStart_ = now;
+            videoFrameStatsBaseCount_ = videoFrameUpdateCount_;
+        }
         if (!videoFrameSeen_) {
             XR_LOGI("DDDVR/OpenXRVideo", "XR_VIDEO_FIRST_FRAME texture=%u", renderer_.videoTextureId());
         } else if (videoFrameUpdateCount_ % 120 == 0) {
@@ -717,6 +944,10 @@ void OpenXrApp::releaseVideoSurfaceOnRenderThread() {
     bool didAttach = false;
     JNIEnv* env = attachCurrentThread(&didAttach);
     if (env != nullptr) {
+        if (videoDecoderSurfaceRef_ != nullptr) {
+            env->DeleteGlobalRef(videoDecoderSurfaceRef_);
+            videoDecoderSurfaceRef_ = nullptr;
+        }
         if (videoSurfaceRef_ != nullptr && videoSurfaceRelease_ != nullptr) {
             env->CallVoidMethod(videoSurfaceRef_, videoSurfaceRelease_);
             if (env->ExceptionCheck()) {
@@ -733,6 +964,8 @@ void OpenXrApp::releaseVideoSurfaceOnRenderThread() {
     detachCurrentThread(didAttach);
     videoFrameSeen_ = false;
     videoFrameUpdateCount_ = 0;
+    videoFrameStatsBaseCount_ = 0;
+    videoFrameStatsStart_ = {};
 }
 
 void OpenXrApp::releaseJavaRefs() {
@@ -740,6 +973,10 @@ void OpenXrApp::releaseJavaRefs() {
     JNIEnv* env = attachCurrentThread(&didAttach);
     if (env == nullptr) return;
 
+    if (videoDecoderSurfaceRef_ != nullptr) {
+        env->DeleteGlobalRef(videoDecoderSurfaceRef_);
+        videoDecoderSurfaceRef_ = nullptr;
+    }
     if (videoSurfaceRef_ != nullptr) {
         if (videoSurfaceRelease_ != nullptr) {
             env->CallVoidMethod(videoSurfaceRef_, videoSurfaceRelease_);

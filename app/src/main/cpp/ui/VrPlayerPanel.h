@@ -63,6 +63,7 @@ struct VrDisplayState {
     std::string aspectRatio = "Оригинал";
     float playbackSpeed = 1.0f;
     bool enhanceVideo = false;
+    bool hdrVideo = false;
     float brightness = 1.0f;
 };
 

@@ -71,7 +71,7 @@ object TrackLogic {
 
         var audioTrackCounter = 0 // Глобальный счетчик аудио треков в ExoPlayer
 
-        for (group in tracks.groups) {
+        for ((groupIndex, group) in tracks.groups.withIndex()) {
             if (group.type == C.TRACK_TYPE_AUDIO) {
                 for (i in 0 until group.length) {
                     val format = group.getTrackFormat(i)
@@ -94,7 +94,8 @@ object TrackLogic {
                         nameFromMeta = nameFromMeta,
                         index = ++audioTrackCounter,
                         group = group,
-                        trackIndex = i
+                        trackIndex = i,
+                        groupIndex = groupIndex
                     ))
                 }
             }
@@ -117,7 +118,7 @@ object TrackLogic {
 
         var subTrackCounter = 0
 
-        for (group in tracks.groups) {
+        for ((groupIndex, group) in tracks.groups.withIndex()) {
             if (group.type == C.TRACK_TYPE_TEXT) {
                 for (i in 0 until group.length) {
                     val format = group.getTrackFormat(i)
@@ -135,7 +136,8 @@ object TrackLogic {
                         nameFromMeta = nameFromMeta,
                         index = ++subTrackCounter,
                         group = group,
-                        trackIndex = i
+                        trackIndex = i,
+                        groupIndex = groupIndex
                     ))
                 }
             }

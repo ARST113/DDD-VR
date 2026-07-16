@@ -12,6 +12,7 @@
 #include "OpenXrRenderer.h"
 #include "OpenXrSession.h"
 #include "OpenXrSwapchain.h"
+#include "../video/FfmpegVideoDecoder.h"
 
 class OpenXrApp {
 public:
@@ -35,6 +36,13 @@ public:
         int selectedAudioTrackIndex
     );
     void setPlayerUiState(const VrPlayerUiState& state);
+    void startFfmpegVideoSource(const std::string& uri, int64_t startPositionMs);
+    void stopFfmpegVideoSource();
+    void setFfmpegPlaybackState(bool playing, int64_t positionMs, bool forceSeek);
+    void setFfmpegMuted(bool muted);
+    bool selectFfmpegAudioTrack(const std::string& trackId);
+    FfmpegPlaybackSnapshot ffmpegPlaybackSnapshot() const;
+    std::vector<FfmpegAudioTrackInfo> ffmpegAudioTracks() const;
 
     bool initialize();
     bool start();
@@ -55,6 +63,8 @@ private:
     void dispatchTimelineSeekOnRenderThread(int32_t progressPermille);
     void dispatchAudioTrackSelectedOnRenderThread(int32_t trackIndex);
     void dispatchPlayerUiActionOnRenderThread(const VrPlayerPanelAction& action);
+    void applyPendingXrColorSpaceOnRenderThread();
+    void applyPendingFfmpegVideoRequestOnRenderThread();
     bool createVideoSurfaceOnRenderThread();
     bool updateVideoSurfaceOnRenderThread();
     void applyPendingVideoSizeOnRenderThread(JNIEnv* env);
@@ -64,6 +74,7 @@ private:
     OpenXrSession session_;
     OpenXrSwapchain swapchain_;
     OpenXrRenderer renderer_;
+    FfmpegVideoDecoder ffmpegVideoDecoder_;
     OpenXrInput input_;
     OpenXrRenderConfig renderConfig_;
     std::thread thread_;
@@ -71,6 +82,8 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> sessionRunning_{false};
     std::atomic<bool> pendingStart_{false};
+    std::atomic<bool> pendingFfmpegVideoRequest_{false};
+    std::atomic<bool> pendingFfmpegStopRequest_{false};
     std::mutex initMutex_;
     std::condition_variable initCv_;
     bool initDone_ = false;
@@ -87,7 +100,12 @@ private:
     std::chrono::steady_clock::time_point startTime_{};
     std::chrono::steady_clock::time_point lastWaitLog_{};
     std::atomic<bool> fboOkSeen_{false};
+    std::atomic<int32_t> pendingHdrColorSpaceIntent_{0};
+    int32_t appliedHdrColorSpaceIntent_ = -1;
     std::string lastError_;
+    std::mutex ffmpegVideoMutex_;
+    std::string pendingFfmpegVideoUri_;
+    int64_t pendingFfmpegVideoStartMs_ = 0;
 
     jobject javaBridgeRef_ = nullptr;
     jclass videoSurfaceClass_ = nullptr;
@@ -102,6 +120,7 @@ private:
     jmethodID videoSurfaceSetDefaultBufferSize_ = nullptr;
     jmethodID videoSurfaceRelease_ = nullptr;
     jobject videoSurfaceRef_ = nullptr;
+    jobject videoDecoderSurfaceRef_ = nullptr;
     jfloatArray videoTransformArray_ = nullptr;
     float videoTransform_[16] = {
         1.f, 0.f, 0.f, 0.f,
@@ -115,4 +134,6 @@ private:
     int32_t appliedVideoHeight_ = 0;
     bool videoFrameSeen_ = false;
     uint64_t videoFrameUpdateCount_ = 0;
+    uint64_t videoFrameStatsBaseCount_ = 0;
+    std::chrono::steady_clock::time_point videoFrameStatsStart_{};
 };
