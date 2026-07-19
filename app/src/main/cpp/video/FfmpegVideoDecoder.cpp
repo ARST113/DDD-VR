@@ -6,11 +6,13 @@
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <sstream>
 #include <utility>
 
@@ -29,6 +31,7 @@ extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mastering_display_metadata.h>
 #include <libavutil/mem.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixfmt.h>
@@ -52,6 +55,8 @@ constexpr size_t kMaxQueuedAudioPackets = 256;
 constexpr size_t kMaxQueuedVideoPackets = 240;
 constexpr auto kStatsInterval = std::chrono::seconds(5);
 constexpr int32_t kMediaCodecColorFormatP010 = 54;
+constexpr int32_t kFourXvrSurfaceColorFormat = 0x7f420888;
+constexpr int32_t kMediaCodecTransferSdrVideo = 3;
 
 void onP010BufferRemoved(void*, AImageReader*, AHardwareBuffer*) {
 }
@@ -156,6 +161,104 @@ bool startsWithAnnexB(const uint8_t* data, int size) {
     if (data == nullptr || size < 3) return false;
     return (data[0] == 0 && data[1] == 0 && data[2] == 1) ||
         (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 1);
+}
+
+const AVPacketSideData* streamSideData(
+    const AVStream* stream,
+    AVPacketSideDataType type
+) {
+    if (stream == nullptr) return nullptr;
+
+#if FF_API_AVSTREAM_SIDE_DATA
+    for (int i = 0; i < stream->nb_side_data; ++i) {
+        if (stream->side_data[i].type == type) return &stream->side_data[i];
+    }
+#endif
+
+    if (stream->codecpar == nullptr) return nullptr;
+    return av_packet_side_data_get(
+        stream->codecpar->coded_side_data,
+        stream->codecpar->nb_coded_side_data,
+        type
+    );
+}
+
+uint16_t scaledRational(const AVRational& value, int scale) {
+    if (value.den == 0) return 0;
+    const int64_t scaled = static_cast<int64_t>(value.num) * scale / value.den;
+    return static_cast<uint16_t>(std::clamp<int64_t>(scaled, 0, 0xffff));
+}
+
+void writeUint16Le(std::array<uint8_t, 25>* bytes, size_t offset, uint16_t value) {
+    (*bytes)[offset] = static_cast<uint8_t>(value & 0xff);
+    (*bytes)[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+bool buildHdrStaticInfo(
+    const AVStream* stream,
+    std::array<uint8_t, 25>* bytes
+) {
+    if (stream == nullptr || bytes == nullptr) return false;
+
+    bytes->fill(0);
+    bool found = false;
+
+    const AVPacketSideData* masteringSideData = streamSideData(
+        stream,
+        AV_PKT_DATA_MASTERING_DISPLAY_METADATA
+    );
+    if (masteringSideData != nullptr && masteringSideData->data != nullptr &&
+        masteringSideData->size >= 80) {
+        const auto* mastering = reinterpret_cast<const AVMasteringDisplayMetadata*>(
+            masteringSideData->data
+        );
+        size_t offset = 1;
+        for (int primary = 0; primary < 3; ++primary) {
+            for (int coordinate = 0; coordinate < 2; ++coordinate) {
+                writeUint16Le(
+                    bytes,
+                    offset,
+                    scaledRational(mastering->display_primaries[primary][coordinate], 50000)
+                );
+                offset += 2;
+            }
+        }
+        for (int coordinate = 0; coordinate < 2; ++coordinate) {
+            writeUint16Le(
+                bytes,
+                offset,
+                scaledRational(mastering->white_point[coordinate], 50000)
+            );
+            offset += 2;
+        }
+        writeUint16Le(bytes, 17, scaledRational(mastering->max_luminance, 1));
+        writeUint16Le(bytes, 19, scaledRational(mastering->min_luminance, 10000));
+        found = true;
+    }
+
+    const AVPacketSideData* lightSideData = streamSideData(
+        stream,
+        AV_PKT_DATA_CONTENT_LIGHT_LEVEL
+    );
+    if (lightSideData != nullptr && lightSideData->data != nullptr &&
+        lightSideData->size >= sizeof(AVContentLightMetadata)) {
+        const auto* light = reinterpret_cast<const AVContentLightMetadata*>(lightSideData->data);
+        writeUint16Le(bytes, 21, static_cast<uint16_t>(std::min(light->MaxCLL, 0xffffu)));
+        writeUint16Le(bytes, 23, static_cast<uint16_t>(std::min(light->MaxFALL, 0xffffu)));
+        found = true;
+    }
+
+    return found;
+}
+
+std::string hdrStaticInfoHex(const std::array<uint8_t, 25>& bytes) {
+    std::ostringstream stream;
+    stream << std::hex << std::setfill('0');
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i != 0) stream << ':';
+        stream << std::setw(2) << static_cast<unsigned>(bytes[i]);
+    }
+    return stream.str();
 }
 
 const char* hdrKind(AVColorTransferCharacteristic transfer, bool dolbyVision) {
@@ -336,7 +439,7 @@ void copyPlane(
     }
 }
 
-bool copyMediaCodecP010(
+bool viewMediaCodecP010(
     const uint8_t* data,
     size_t dataSize,
     int width,
@@ -351,10 +454,14 @@ bool copyMediaCodecP010(
     if (data == nullptr || out == nullptr || parameters == nullptr || width <= 0 || height <= 0) {
         return false;
     }
+    // MediaFormat.KEY_STRIDE is specified in pixels. Some vendors expose a
+    // byte stride instead, so preserve already-byte-sized values.
+    strideBytes = strideBytes < width * 2
+        ? strideBytes * 2
+        : strideBytes;
     strideBytes = std::max(width * 2, strideBytes);
     sliceHeight = std::max(height, sliceHeight);
     const int sourceStrideBytes = strideBytes;
-    const int yRowBytes = width * 2;
     const int chromaRows = (height + 1) / 2;
     const size_t yStorageBytes =
         static_cast<size_t>(sourceStrideBytes) * static_cast<size_t>(sliceHeight);
@@ -384,16 +491,13 @@ bool copyMediaCodecP010(
     result.range = mapRange(parameters->color_range);
     result.dolbyProfile = dolbyProfile;
     result.dolbyVision = dolbyProfile > 0;
-    result.strides[0] = yRowBytes;
-    result.strides[1] = yRowBytes;
-    copyPlane(result.planes[0], data, sourceStrideBytes, yRowBytes, height);
-    copyPlane(
-        result.planes[1],
-        data + yStorageBytes,
-        sourceStrideBytes,
-        yRowBytes,
-        chromaRows
-    );
+    result.strides[0] = sourceStrideBytes;
+    result.strides[1] = sourceStrideBytes;
+    result.planeViews[0] = data;
+    result.planeViewSizes[0] = yStorageBytes;
+    result.planeViews[1] = data + yStorageBytes;
+    result.planeViewSizes[1] =
+        static_cast<size_t>(sourceStrideBytes) * static_cast<size_t>(chromaRows);
     *out = std::move(result);
     return true;
 }
@@ -549,6 +653,12 @@ bool FfmpegVideoDecoder::start(
         audioTracks_.clear();
         lastError_.clear();
     }
+    {
+        std::lock_guard<std::mutex> lock(directFrameMutex_);
+        directFrame_ = {};
+        directFrameAvailable_ = false;
+        directFrameAcquired_ = false;
+    }
 #if DDDVR_HAS_FFMPEG_VIDEO
     if (uri.empty()) {
         setError("empty uri");
@@ -600,11 +710,18 @@ bool FfmpegVideoDecoder::start(
 
 void FfmpegVideoDecoder::stop() {
     running_.store(false);
+    directFrameConsumed_.notify_all();
     audioOutput_.stop();
     if (thread_.joinable()) {
         thread_.join();
     }
     destroyP010ImageReader();
+    {
+        std::lock_guard<std::mutex> directLock(directFrameMutex_);
+        directFrame_ = {};
+        directFrameAvailable_ = false;
+        directFrameAcquired_ = false;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     frames_.clear();
     audioTracks_.clear();
@@ -693,6 +810,26 @@ FfmpegPlaybackSnapshot FfmpegVideoDecoder::playbackSnapshot() const {
 std::vector<FfmpegAudioTrackInfo> FfmpegVideoDecoder::audioTracks() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return audioTracks_;
+}
+
+bool FfmpegVideoDecoder::pollDirectFrame(FfmpegVideoFrame* outFrame) {
+    if (outFrame == nullptr) return false;
+    std::lock_guard<std::mutex> lock(directFrameMutex_);
+    if (!directFrameAvailable_ || directFrameAcquired_) return false;
+    *outFrame = directFrame_;
+    directFrameAcquired_ = true;
+    return true;
+}
+
+void FfmpegVideoDecoder::releaseDirectFrame() {
+    {
+        std::lock_guard<std::mutex> lock(directFrameMutex_);
+        if (!directFrameAvailable_) return;
+        directFrame_ = {};
+        directFrameAvailable_ = false;
+        directFrameAcquired_ = false;
+    }
+    directFrameConsumed_.notify_one();
 }
 
 bool FfmpegVideoDecoder::pollFrame(FfmpegVideoFrame* outFrame) {
@@ -839,6 +976,56 @@ bool FfmpegVideoDecoder::pollHardwareBufferFrame(FfmpegHardwareBufferFrame* outF
     return true;
 }
 
+bool FfmpegVideoDecoder::pollHardwareSurfaceMetadata(
+    FfmpegVideoFrame* outFrame,
+    int64_t surfacePtsUs
+) {
+    if (outFrame == nullptr || !hardwareSurfaceActive_.load()) return false;
+
+    *outFrame = {};
+    outFrame->width = videoWidth_.load();
+    outFrame->height = videoHeight_.load();
+    if (outFrame->width <= 0 || outFrame->height <= 0) return false;
+
+    const int64_t presentedPositionMs = lastPresentedPositionMs_.load();
+    outFrame->ptsUs = surfacePtsUs >= 0
+        ? surfacePtsUs
+        : std::max<int64_t>(0, presentedPositionMs) * 1000;
+    outFrame->transfer = static_cast<FfmpegVideoColorTransfer>(hardwareTransfer_.load());
+    outFrame->primaries = static_cast<FfmpegVideoColorPrimaries>(hardwarePrimaries_.load());
+    outFrame->range = static_cast<FfmpegVideoColorRange>(hardwareRange_.load());
+    outFrame->dolbyProfile = hardwareDolbyProfile_.load();
+    outFrame->dolbyVision = outFrame->dolbyProfile > 0;
+    outFrame->dolbyMetadata = dolbyMetadataForPts(outFrame->ptsUs);
+    static int64_t lastLoggedSurfacePtsUs = -1;
+    if (surfacePtsUs >= 0 && surfacePtsUs != lastLoggedSurfacePtsUs) {
+        static uint64_t surfaceMetadataFrames = 0;
+        ++surfaceMetadataFrames;
+        if (surfaceMetadataFrames <= 8 || surfaceMetadataFrames % 120 == 0) {
+            const int64_t metadataPtsUs = outFrame->dolbyMetadata
+                ? outFrame->dolbyMetadata->ptsUs
+                : -1;
+            XR_LOGI(
+                "DDDVR/FFmpegVideo",
+                "FFMPEG_VIDEO_SURFACE_RPU_SYNC frame=%llu surfacePtsUs=%lld decoderReleasedPtsUs=%lld metadataPtsUs=%lld deltaUs=%lld revision=%llu hash=%llu",
+                (unsigned long long)surfaceMetadataFrames,
+                (long long)surfacePtsUs,
+                (long long)(std::max<int64_t>(0, presentedPositionMs) * 1000),
+                (long long)metadataPtsUs,
+                (long long)(metadataPtsUs >= 0 ? surfacePtsUs - metadataPtsUs : 0),
+                outFrame->dolbyMetadata
+                    ? (unsigned long long)outFrame->dolbyMetadata->revision
+                    : 0ULL,
+                outFrame->dolbyMetadata
+                    ? (unsigned long long)outFrame->dolbyMetadata->mappingHash
+                    : 0ULL
+            );
+        }
+        lastLoggedSurfacePtsUs = surfacePtsUs;
+    }
+    return true;
+}
+
 void FfmpegVideoDecoder::storeDolbyMetadata(
     std::shared_ptr<const DolbyRpuMetadata> metadata
 ) {
@@ -888,6 +1075,28 @@ void FfmpegVideoDecoder::pushFrame(FfmpegVideoFrame&& frame) {
     }
 }
 
+bool FfmpegVideoDecoder::publishDirectFrame(FfmpegVideoFrame&& frame) {
+    std::unique_lock<std::mutex> lock(directFrameMutex_);
+    directFrameConsumed_.wait(lock, [this]() {
+        return !running_.load() || !directFrameAvailable_;
+    });
+    if (!running_.load()) return false;
+
+    directFrame_ = std::move(frame);
+    directFrameAvailable_ = true;
+    directFrameAcquired_ = false;
+
+    while (directFrameAvailable_) {
+        if (!running_.load() && !directFrameAcquired_) {
+            directFrame_ = {};
+            directFrameAvailable_ = false;
+            return false;
+        }
+        directFrameConsumed_.wait_for(lock, std::chrono::milliseconds(20));
+    }
+    return true;
+}
+
 void FfmpegVideoDecoder::setError(const std::string& error) {
     std::lock_guard<std::mutex> lock(mutex_);
     lastError_ = error;
@@ -895,6 +1104,12 @@ void FfmpegVideoDecoder::setError(const std::string& error) {
 
 void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
 #if DDDVR_HAS_FFMPEG_VIDEO
+    const auto startupBegin = std::chrono::steady_clock::now();
+    const auto startupElapsedMs = [&]() -> int64_t {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - startupBegin
+        ).count();
+    };
     avformat_network_init();
     AVFormatContext* format = nullptr;
     AVCodecContext* codec = nullptr;
@@ -1048,6 +1263,12 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         cleanup();
         return;
     }
+    XR_LOGI(
+        "DDDVR/FFmpegVideo",
+        "FFMPEG_STARTUP_STAGE stage=open_input elapsedMs=%lld startMs=%lld",
+        (long long)startupElapsedMs(),
+        (long long)startPositionMs
+    );
     err = avformat_find_stream_info(format, nullptr);
     if (err < 0) {
         setError("avformat_find_stream_info failed: " + ffError(err));
@@ -1055,6 +1276,12 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         cleanup();
         return;
     }
+    XR_LOGI(
+        "DDDVR/FFmpegVideo",
+        "FFMPEG_STARTUP_STAGE stage=stream_info elapsedMs=%lld streams=%u",
+        (long long)startupElapsedMs(),
+        format->nb_streams
+    );
 
     const int videoStream = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     if (videoStream < 0) {
@@ -1125,6 +1352,37 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
     const int initialAudioStream = defaultAudioStream >= 0
         ? defaultAudioStream
         : (firstAudioStream >= 0 ? firstAudioStream : bestAudioStream);
+
+    // Seek before opening MediaCodec and the audio decoder. The previous path
+    // opened both decoders at position zero, then immediately flushed video
+    // and closed/reopened audio for a non-zero start position. On remote MKV
+    // streams that duplicated codec setup and made resume noticeably slower.
+    bool initialSeekApplied = false;
+    if (startPositionMs > 0) {
+        const int64_t targetUs = startPositionMs * 1000;
+        const int64_t streamTs = av_rescale_q(
+            targetUs,
+            AVRational{1, 1000000},
+            stream->time_base
+        );
+        const int seekErr = av_seek_frame(
+            format,
+            videoStream,
+            streamTs,
+            AVSEEK_FLAG_BACKWARD
+        );
+        initialSeekApplied = seekErr >= 0;
+        seekInFlight_.store(initialSeekApplied);
+        buffering_.store(initialSeekApplied);
+        XR_LOGI(
+            "DDDVR/FFmpegVideo",
+            "FFMPEG_STARTUP_STAGE stage=initial_seek elapsedMs=%lld positionMs=%lld applied=%d err=%s",
+            (long long)startupElapsedMs(),
+            (long long)startPositionMs,
+            initialSeekApplied ? 1 : 0,
+            initialSeekApplied ? "ok" : ffError(seekErr).c_str()
+        );
+    }
 
     int64_t audioDiscardUntilPtsUs = startPositionMs > 0 ? startPositionMs * 1000 : -1;
     auto openAudioStream = [&](int streamIndex, int64_t clockPositionUs) -> bool {
@@ -1427,10 +1685,10 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         return {videoDepth, audioDepth};
     };
 
+    bool initialAudioReady = false;
     if (initialAudioStream >= 0) {
-        if (openAudioStream(initialAudioStream, startPositionMs * 1000)) {
-            startAudioWorker();
-        } else {
+        initialAudioReady = openAudioStream(initialAudioStream, startPositionMs * 1000);
+        if (!initialAudioReady) {
             XR_LOGW(
                 "DDDVR/FFmpegAudio",
                 "FFMPEG_AUDIO_DISABLED initialStream=%d bestStream=%d",
@@ -1441,7 +1699,6 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
     } else {
         XR_LOGW("DDDVR/FFmpegAudio", "FFMPEG_AUDIO_NO_STREAM");
     }
-    startDemuxWorker();
 
     const char* ndkMime = mediaCodecMime(stream->codecpar->codec_id);
     const char* bsfName = annexBFilterName(stream->codecpar->codec_id);
@@ -1522,13 +1779,24 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                     "color-format",
                     kMediaCodecColorFormatP010
                 );
+            } else if (streamHdr) {
+                // Match 4XVR's Pico Surface path exactly: Qualcomm converts
+                // the decoded TP10 frame to NV12 before samplerExternalOES.
+                AMediaFormat_setInt32(
+                    ndkMediaFormat,
+                    "color-format",
+                    kFourXvrSurfaceColorFormat
+                );
             }
 
             const int colorStandard = mediaCodecColorStandard(
                 stream->codecpar->color_primaries,
                 stream->codecpar->color_space
             );
-            const int colorTransfer = mediaCodecColorTransfer(stream->codecpar->color_trc);
+            const int sourceColorTransfer = mediaCodecColorTransfer(stream->codecpar->color_trc);
+            const int colorTransfer = !p010 && streamHdr
+                ? kMediaCodecTransferSdrVideo
+                : sourceColorTransfer;
             const int colorRange = mediaCodecColorRange(stream->codecpar->color_range);
             if (colorStandard != 0) AMediaFormat_setInt32(ndkMediaFormat, "color-standard", colorStandard);
             if (colorTransfer != 0) AMediaFormat_setInt32(ndkMediaFormat, "color-transfer", colorTransfer);
@@ -1547,6 +1815,27 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                 );
             }
 
+            std::array<uint8_t, 25> hdrStaticInfo{};
+            const bool hasHdrStaticInfo = buildHdrStaticInfo(stream, &hdrStaticInfo);
+            if (hasHdrStaticInfo) {
+                AMediaFormat_setBuffer(
+                    ndkMediaFormat,
+                    "hdr-static-info",
+                    hdrStaticInfo.data(),
+                    hdrStaticInfo.size()
+                );
+                XR_LOGI(
+                    "DDDVR/FFmpegVideo",
+                    "FFMPEG_VIDEO_HDR_STATIC_INFO bytes=%s",
+                    hdrStaticInfoHex(hdrStaticInfo).c_str()
+                );
+            } else {
+                XR_LOGI(
+                    "DDDVR/FFmpegVideo",
+                    "FFMPEG_VIDEO_HDR_STATIC_INFO absent"
+                );
+            }
+
             XR_LOGI(
                 "DDDVR/FFmpegVideo",
                 "FFMPEG_VIDEO_NDK_CONFIG path=%s format=%s bsf=%s csd=%d hdr=%d transfer=%d primaries=%d range=%d",
@@ -1557,7 +1846,7 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                     csdParameters->extradata,
                     csdParameters->extradata_size
                 ) ? 1 : 0,
-                colorTransfer == 6 || colorTransfer == 7 ? 1 : 0,
+                streamHdr ? 1 : 0,
                 stream->codecpar->color_trc,
                 stream->codecpar->color_primaries,
                 stream->codecpar->color_range
@@ -1595,8 +1884,25 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
             return false;
         };
 
-        if (bsfReady && requestP010) {
-            if (createP010ImageReader(
+        if (bsfReady && ndkNativeWindow != nullptr) {
+            // 4XVR's active Pico HDR path renders MediaCodec into a Surface
+            // and samples the result through samplerExternalOES. Keep FFmpeg
+            // as the demuxer, but let Pico perform the same P010-to-RGB step.
+            useNdkMediaCodecSurface = configureNdkCodec(
+                false,
+                ndkNativeWindow,
+                "surface_4xvr"
+            );
+        }
+        if (bsfReady && requestP010 && !useNdkMediaCodecSurface) {
+            // Raw P010 remains the fallback for devices/codecs that cannot
+            // configure the MediaCodec Surface path.
+            useNdkMediaCodecP010 = configureNdkCodec(
+                true,
+                nullptr,
+                "p010_buffer"
+            );
+            if (!useNdkMediaCodecP010 && createP010ImageReader(
                     stream->codecpar->width,
                     stream->codecpar->height,
                     &p010ImageReaderWindow
@@ -1611,16 +1917,10 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                     p010ImageReaderWindow = nullptr;
                 }
             }
-            if (!useNdkMediaCodecP010ImageReader) {
-                useNdkMediaCodecP010 = configureNdkCodec(
-                    true,
-                    nullptr,
-                    "p010_buffer"
-                );
-            }
         }
-        if (bsfReady && !useNdkMediaCodecP010ImageReader &&
-            !useNdkMediaCodecP010 && ndkNativeWindow != nullptr) {
+        if (bsfReady && !useNdkMediaCodecSurface &&
+            !useNdkMediaCodecP010ImageReader && !useNdkMediaCodecP010 &&
+            ndkNativeWindow != nullptr) {
             useNdkMediaCodecSurface = configureNdkCodec(
                 false,
                 ndkNativeWindow,
@@ -1640,7 +1940,9 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
             return;
         }
 
-        int64_t discardUntilPtsUs = -1;
+        int64_t discardUntilPtsUs = initialSeekApplied
+            ? std::max<int64_t>(0, startPositionMs * 1000 - kSeekPrerollToleranceUs)
+            : -1;
         auto statsStart = std::chrono::steady_clock::now();
         uint64_t inputPackets = 0;
         uint64_t decodedFrames = 0;
@@ -1648,6 +1950,7 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         uint64_t discardedPrerollFrames = 0;
         uint64_t discardedLateFrames = 0;
         uint64_t inputFailures = 0;
+        bool firstFrameLogged = false;
         int outputWidth = stream->codecpar->width;
         int outputHeight = stream->codecpar->height;
         int outputStride = outputWidth * 2;
@@ -1773,7 +2076,7 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                         FfmpegVideoFrame p010Frame{};
                         frameReady =
                             outputColorFormat == kMediaCodecColorFormatP010 &&
-                            copyMediaCodecP010(
+                            viewMediaCodecP010(
                                 outputBuffer != nullptr && offset < outputCapacity
                                     ? outputBuffer + offset
                                     : nullptr,
@@ -1788,7 +2091,10 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                                 &p010Frame
                             );
                         if (frameReady) {
-                            pushFrame(std::move(p010Frame));
+                            p010Frame.dolbyMetadata = dolbyMetadataForPts(
+                                p010Frame.ptsUs
+                            );
+                            frameReady = publishDirectFrame(std::move(p010Frame));
                         } else {
                             ++inputFailures;
                             XR_LOGW(
@@ -1814,6 +2120,16 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                         lastPresentedPositionMs_.store(
                             std::max<int64_t>(0, info.presentationTimeUs / 1000)
                         );
+                        if (!firstFrameLogged) {
+                            firstFrameLogged = true;
+                            XR_LOGI(
+                                "DDDVR/FFmpegVideo",
+                                "FFMPEG_STARTUP_STAGE stage=first_frame path=ndk_mediacodec elapsedMs=%lld presentedMs=%lld startMs=%lld",
+                                (long long)startupElapsedMs(),
+                                (long long)(info.presentationTimeUs / 1000),
+                                (long long)startPositionMs
+                            );
+                        }
                         if (discardUntilPtsUs >= 0) {
                             XR_LOGI(
                                 "DDDVR/FFmpegVideo",
@@ -1951,7 +2267,19 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
             startDemuxWorker();
         };
 
-        if (startPositionMs > 0) seekNdkToMs(startPositionMs);
+        if (startPositionMs > 0 && !initialSeekApplied) {
+            seekNdkToMs(startPositionMs);
+        } else {
+            if (initialAudioReady) startAudioWorker();
+            startDemuxWorker();
+            XR_LOGI(
+                "DDDVR/FFmpegVideo",
+                "FFMPEG_AV_START_ALIGNED path=ndk_mediacodec audioReady=%d positionMs=%lld initialSeek=%d",
+                initialAudioReady ? 1 : 0,
+                (long long)startPositionMs,
+                initialSeekApplied ? 1 : 0
+            );
+        }
         XR_LOGI(
             "DDDVR/FFmpegVideo",
             "FFMPEG_VIDEO_READY stream=%d path=%s decoder=%s width=%d height=%d hdr=%d hdrKind=%s transfer=%d primaries=%d range=%d doviProfile=%d",
@@ -2135,8 +2463,11 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         return;
     }
 
-    int64_t discardUntilPtsUs = -1;
+    int64_t discardUntilPtsUs = initialSeekApplied
+        ? std::max<int64_t>(0, startPositionMs * 1000 - kSeekPrerollToleranceUs)
+        : -1;
     uint64_t discardedPrerollFrames = 0;
+    bool firstFrameLogged = false;
 
     auto seekToMs = [&](int64_t positionMs) {
         const int64_t targetUs = std::max<int64_t>(0, positionMs) * 1000;
@@ -2163,8 +2494,18 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
         startDemuxWorker();
     };
 
-    if (startPositionMs > 0) {
+    if (startPositionMs > 0 && !initialSeekApplied) {
         seekToMs(startPositionMs);
+    } else {
+        if (initialAudioReady) startAudioWorker();
+        startDemuxWorker();
+        XR_LOGI(
+            "DDDVR/FFmpegVideo",
+            "FFMPEG_AV_START_ALIGNED path=ffmpeg_decode audioReady=%d positionMs=%lld initialSeek=%d",
+            initialAudioReady ? 1 : 0,
+            (long long)startPositionMs,
+            initialSeekApplied ? 1 : 0
+        );
     }
 
     auto statsStart = std::chrono::steady_clock::now();
@@ -2381,6 +2722,17 @@ void FfmpegVideoDecoder::decodeLoop(std::string uri, int64_t startPositionMs) {
                 } else {
                     ++conversionFailures;
                 }
+            }
+            if (framePresented && !firstFrameLogged) {
+                firstFrameLogged = true;
+                XR_LOGI(
+                    "DDDVR/FFmpegVideo",
+                    "FFMPEG_STARTUP_STAGE stage=first_frame path=%s elapsedMs=%lld presentedMs=%lld startMs=%lld",
+                    useHardwareSurface ? "mediacodec_surface" : "software_yuv_upload",
+                    (long long)startupElapsedMs(),
+                    (long long)lastPresentedPositionMs_.load(),
+                    (long long)startPositionMs
+                );
             }
             if (discardUntilPtsUs >= 0 && framePresented) {
                 XR_LOGI(

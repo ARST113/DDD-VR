@@ -6,12 +6,30 @@
 #include <GLES2/gl2ext.h>
 
 namespace {
+// GL_EXT_texture_norm16 enums used directly by 4XVR's P010 upload path.
+constexpr GLenum kGlR16Norm = 0x822A;
+constexpr GLenum kGlRg16Norm = 0x822C;
+
 int chromaSize(int value) {
     return (value + 1) / 2;
 }
 
 bool hasPlane(const FfmpegVideoFrame& frame, int index) {
-    return index >= 0 && index < 4 && !frame.planes[index].empty();
+    return index >= 0 && index < 4 &&
+        (!frame.planes[index].empty() ||
+            (frame.planeViews[index] != nullptr && frame.planeViewSizes[index] > 0));
+}
+
+const uint8_t* planeData(const FfmpegVideoFrame& frame, int index) {
+    if (index < 0 || index >= 4) return nullptr;
+    if (!frame.planes[index].empty()) return frame.planes[index].data();
+    return frame.planeViews[index];
+}
+
+size_t planeSize(const FfmpegVideoFrame& frame, int index) {
+    if (index < 0 || index >= 4) return 0;
+    if (!frame.planes[index].empty()) return frame.planes[index].size();
+    return frame.planeViewSizes[index];
 }
 }
 
@@ -27,8 +45,8 @@ void FfmpegVideoTexture::ensureTextures() {
         glBindTexture(GL_TEXTURE_2D, texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     }
     XR_LOGI(
         "DDDVR/FFmpegVideo",
@@ -47,13 +65,25 @@ bool FfmpegVideoTexture::uploadPlane(
     GLenum type,
     int width,
     int height,
-    const std::vector<uint8_t>& data
+    const uint8_t* data,
+    size_t dataSize,
+    int rowStrideBytes,
+    int bytesPerPixel
 ) {
-    if (index < 0 || index >= 4 || textureSet_.planes[index] == 0 || width <= 0 || height <= 0 || data.empty()) {
+    const int tightRowBytes = width * bytesPerPixel;
+    if (rowStrideBytes <= 0) rowStrideBytes = tightRowBytes;
+    const size_t requiredBytes = static_cast<size_t>(rowStrideBytes) *
+        static_cast<size_t>(std::max(0, height - 1)) +
+        static_cast<size_t>(tightRowBytes);
+    if (index < 0 || index >= 4 || textureSet_.planes[index] == 0 ||
+        width <= 0 || height <= 0 || data == nullptr ||
+        bytesPerPixel <= 0 || rowStrideBytes < tightRowBytes ||
+        rowStrideBytes % bytesPerPixel != 0 || dataSize < requiredBytes) {
         return false;
     }
     glBindTexture(GL_TEXTURE_2D, textureSet_.planes[index]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, rowStrideBytes / bytesPerPixel);
     const bool allocationChanged =
         allocatedWidths_[index] != width ||
         allocatedHeights_[index] != height ||
@@ -83,8 +113,9 @@ bool FfmpegVideoTexture::uploadPlane(
         height,
         format,
         type,
-        data.data()
+        data
     );
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     const GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         XR_LOGE(
@@ -121,25 +152,25 @@ bool FfmpegVideoTexture::upload(const FfmpegVideoFrame& frame) {
                 hasPlane(frame, 0) &&
                 hasPlane(frame, 1) &&
                 hasPlane(frame, 2) &&
-                uploadPlane(0, GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, width, height, frame.planes[0]) &&
-                uploadPlane(1, GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, chromaWidth, chromaHeight, frame.planes[1]) &&
-                uploadPlane(2, GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, chromaWidth, chromaHeight, frame.planes[2]);
+                uploadPlane(0, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height, planeData(frame, 0), planeSize(frame, 0), frame.strides[0], 1) &&
+                uploadPlane(1, GL_R8, GL_RED, GL_UNSIGNED_BYTE, chromaWidth, chromaHeight, planeData(frame, 1), planeSize(frame, 1), frame.strides[1], 1) &&
+                uploadPlane(2, GL_R8, GL_RED, GL_UNSIGNED_BYTE, chromaWidth, chromaHeight, planeData(frame, 2), planeSize(frame, 2), frame.strides[2], 1);
             break;
         case FfmpegVideoPixelFormat::Yuv420P10:
             ok =
                 hasPlane(frame, 0) &&
                 hasPlane(frame, 1) &&
                 hasPlane(frame, 2) &&
-                uploadPlane(0, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, width, height, frame.planes[0]) &&
-                uploadPlane(1, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, frame.planes[1]) &&
-                uploadPlane(2, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, frame.planes[2]);
+                uploadPlane(0, kGlR16Norm, GL_RED, GL_UNSIGNED_SHORT, width, height, planeData(frame, 0), planeSize(frame, 0), frame.strides[0], 2) &&
+                uploadPlane(1, kGlR16Norm, GL_RED, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, planeData(frame, 1), planeSize(frame, 1), frame.strides[1], 2) &&
+                uploadPlane(2, kGlR16Norm, GL_RED, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, planeData(frame, 2), planeSize(frame, 2), frame.strides[2], 2);
             break;
         case FfmpegVideoPixelFormat::P010:
             ok =
                 hasPlane(frame, 0) &&
                 hasPlane(frame, 1) &&
-                uploadPlane(0, GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, width, height, frame.planes[0]) &&
-                uploadPlane(1, GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, frame.planes[1]);
+                uploadPlane(0, kGlR16Norm, GL_RED, GL_UNSIGNED_SHORT, width, height, planeData(frame, 0), planeSize(frame, 0), frame.strides[0], 2) &&
+                uploadPlane(1, kGlRg16Norm, GL_RG, GL_UNSIGNED_SHORT, chromaWidth, chromaHeight, planeData(frame, 1), planeSize(frame, 1), frame.strides[1], 4);
             break;
         default:
             ok = false;

@@ -41,7 +41,10 @@ private:
         GLenum type,
         int width,
         int height,
-        const std::vector<uint8_t>& data
+        const uint8_t* data,
+        size_t dataSize,
+        int rowStrideBytes,
+        int bytesPerPixel
     );
     void destroyExternalImage();
 

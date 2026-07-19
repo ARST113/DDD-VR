@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">dd Vr</string>
+    <string name="app_name">DDD VR</string>
 
     <!-- Common Strings -->
     <string name="close">Close</string>

@@ -24,6 +24,7 @@ class CinemaScreenRenderer {
 public:
     bool initialize(float screenWidthMeters, float screenDistanceMeters, float curveRadians);
     void setPlacement(float yawRadians, float centerX, float centerY, float centerZ, float curveRadians);
+    void setAspectRatio(float aspectRatio);
     void setColorControls(float brightness, float contrast, float saturation, float gamma);
     void setHdrLookEnabled(bool enabled);
     void renderVideo(
@@ -112,11 +113,13 @@ private:
     GLint dolbyProfileLoc_ = -1;
     GLint hdrPowerValueLoc_ = -1;
     GLint hdrColorMatrixLoc_ = -1;
+    GLint colorFixLoc_ = -1;
     GLint dolbyMappingEnabledLoc_ = -1;
     GLint dolbyMappingKindLoc_ = -1;
     GLint dolbySampler2DLoc_[3] = {-1, -1, -1};
     GLint dolbySampler3DLoc_[3] = {-1, -1, -1};
     GLint dolbyColorEnabledLoc_ = -1;
+    GLint dolbyInputColorInverseLoc_ = -1;
     GLint dolbyYccToRgbLoc_ = -1;
     GLint dolbyYccOffsetLoc_ = -1;
     GLint dolbyColorMatrixLoc_ = -1;
@@ -137,6 +140,7 @@ private:
     GLint ffmpegDolbyProfileLoc_ = -1;
     GLint ffmpegHdrPowerValueLoc_ = -1;
     GLint ffmpegHdrColorMatrixLoc_ = -1;
+    GLint ffmpegColorFixLoc_ = -1;
     GLint ffmpegDolbyMappingEnabledLoc_ = -1;
     GLint ffmpegDolbyMappingKindLoc_ = -1;
     GLint ffmpegDolbySampler2DLoc_[3] = {-1, -1, -1};

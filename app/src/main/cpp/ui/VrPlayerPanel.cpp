@@ -316,8 +316,8 @@ void VrPlayerPanel::draw() {
         const ImRect closeIcon(ImVec2(closeRect.Min.x + 12.f, closeRect.Min.y + 12.f), ImVec2(closeRect.Max.x - 12.f, closeRect.Max.y - 12.f));
         drawIcon(draw, closeIcon, IconKind::Close, closeHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(245, 248, 255, 242));
         if (closeClicked) {
-            exitRequested_ = true;
-            XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION modal_close_exit");
+            pushAction(VrPlayerPanelActionType::CloseModal);
+            XR_LOGI("DDDVR/OpenXRUi", "XR_UI_ACTION modal_close");
         }
     };
 

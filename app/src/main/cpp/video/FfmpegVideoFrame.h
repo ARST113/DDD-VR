@@ -2,6 +2,7 @@
 
 #include <android/hardware_buffer.h>
 #include <media/NdkImage.h>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -47,6 +48,8 @@ struct FfmpegVideoFrame {
     bool dolbyVision = false;
     std::shared_ptr<const DolbyRpuMetadata> dolbyMetadata;
     std::vector<uint8_t> planes[4];
+    const uint8_t* planeViews[4] = {nullptr, nullptr, nullptr, nullptr};
+    size_t planeViewSizes[4] = {0, 0, 0, 0};
     int strides[4] = {0, 0, 0, 0};
 };
 

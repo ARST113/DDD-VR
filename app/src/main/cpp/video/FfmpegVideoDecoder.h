@@ -56,8 +56,11 @@ public:
     bool selectAudioTrack(const std::string& trackId);
     FfmpegPlaybackSnapshot playbackSnapshot() const;
     std::vector<FfmpegAudioTrackInfo> audioTracks() const;
+    bool pollDirectFrame(FfmpegVideoFrame* outFrame);
+    void releaseDirectFrame();
     bool pollFrame(FfmpegVideoFrame* outFrame);
     bool pollHardwareBufferFrame(FfmpegHardwareBufferFrame* outFrame);
+    bool pollHardwareSurfaceMetadata(FfmpegVideoFrame* outFrame, int64_t surfacePtsUs = -1);
     bool running() const { return running_.load(); }
     bool usingHardwareSurface() const { return hardwareSurfaceActive_.load(); }
     bool linked() const;
@@ -66,6 +69,7 @@ public:
 private:
     void decodeLoop(std::string uri, int64_t startPositionMs);
     void pushFrame(FfmpegVideoFrame&& frame);
+    bool publishDirectFrame(FfmpegVideoFrame&& frame);
     bool createP010ImageReader(int width, int height, ANativeWindow** outWindow);
     void destroyP010ImageReader();
     void setError(const std::string& error);
@@ -99,9 +103,14 @@ private:
     FfmpegAudioOutput audioOutput_;
     std::thread thread_;
     mutable std::mutex mutex_;
+    mutable std::mutex directFrameMutex_;
     mutable std::mutex p010ImageReaderMutex_;
     mutable std::mutex dolbyMetadataMutex_;
     AImageReader* p010ImageReader_ = nullptr;
+    std::condition_variable directFrameConsumed_;
+    FfmpegVideoFrame directFrame_;
+    bool directFrameAvailable_ = false;
+    bool directFrameAcquired_ = false;
     std::deque<FfmpegVideoFrame> frames_;
     std::map<int64_t, std::shared_ptr<const DolbyRpuMetadata>> dolbyMetadataByPts_;
     std::vector<FfmpegAudioTrackInfo> audioTracks_;

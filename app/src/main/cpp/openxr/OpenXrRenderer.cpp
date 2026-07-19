@@ -1,4 +1,5 @@
 #include "OpenXrRenderer.h"
+#include "../video/DolbyRpuParser.h"
 #include "../video/AndroidImageApi.h"
 #include "../ui/VrPlayerTheme.h"
 #include "../util/XrLog.h"
@@ -419,6 +420,72 @@ void OpenXrRenderer::setVideoFrameState(const float* transformMatrix, bool hasVi
     hasVideoFrame_ = hasVideoFrame_ || hasVideo;
 }
 
+void OpenXrRenderer::setVideoSize(int width, int height, float pixelWidthHeightRatio) {
+    if (width <= 0 || height <= 0) return;
+    videoWidth_ = width;
+    videoHeight_ = height;
+    pixelWidthHeightRatio_ = std::isfinite(pixelWidthHeightRatio) && pixelWidthHeightRatio > 0.f
+        ? pixelWidthHeightRatio
+        : 1.f;
+
+    float aspectRatio =
+        (static_cast<float>(videoWidth_) * pixelWidthHeightRatio_) /
+        static_cast<float>(videoHeight_);
+    const bool fullPacking = config_.stereoPacking == OpenXrStereoPackingNative::Full;
+    const bool sideBySide =
+        config_.stereoMode == OpenXrStereoMode::Sbs ||
+        config_.stereoMode == OpenXrStereoMode::SbsReversed ||
+        config_.stereoMode == OpenXrStereoMode::VrCamV1 ||
+        config_.stereoMode == OpenXrStereoMode::VrCamV2;
+    const bool overUnder =
+        config_.stereoMode == OpenXrStereoMode::Ou ||
+        config_.stereoMode == OpenXrStereoMode::OuReversed;
+    if (fullPacking && sideBySide) {
+        aspectRatio *= 0.5f;
+    } else if (fullPacking && overUnder) {
+        aspectRatio *= 2.f;
+    }
+
+    originalDisplayAspectRatio_ = std::clamp(aspectRatio, 0.75f, 3.20f);
+    displayAspectRatio_ = displayAspectRatioOverride_ > 0.f
+        ? displayAspectRatioOverride_
+        : originalDisplayAspectRatio_;
+    screen_.setAspectRatio(displayAspectRatio_);
+    XR_LOGI(
+        "DDDVR/OpenXRVideo",
+        "XR_VIDEO_ASPECT source=%dx%d pixelRatio=%.5f stereo=%d packing=%s original=%.5f override=%.5f applied=%.5f",
+        videoWidth_,
+        videoHeight_,
+        pixelWidthHeightRatio_,
+        static_cast<int>(config_.stereoMode),
+        fullPacking ? "full" : "half",
+        originalDisplayAspectRatio_,
+        displayAspectRatioOverride_,
+        displayAspectRatio_
+    );
+}
+
+void OpenXrRenderer::setDisplayAspectRatio(float aspectRatio) {
+    displayAspectRatioOverride_ = std::isfinite(aspectRatio) && aspectRatio > 0.f
+        ? std::clamp(aspectRatio, 0.75f, 3.20f)
+        : 0.f;
+    displayAspectRatio_ = displayAspectRatioOverride_ > 0.f
+        ? displayAspectRatioOverride_
+        : originalDisplayAspectRatio_;
+    screen_.setAspectRatio(displayAspectRatio_);
+    XR_LOGI(
+        "DDDVR/OpenXRVideo",
+        "XR_VIDEO_ASPECT_OVERRIDE requested=%.5f original=%.5f applied=%.5f",
+        aspectRatio,
+        originalDisplayAspectRatio_,
+        displayAspectRatio_
+    );
+}
+
+float OpenXrRenderer::screenHeightMeters() const {
+    return config_.screenWidthMeters / std::max(displayAspectRatio_, 0.75f);
+}
+
 bool OpenXrRenderer::uploadFfmpegVideoFrame(const FfmpegVideoFrame& frame) {
     if (!ffmpegVideoEnabled_) return false;
     const bool uploaded = ffmpegVideo_.upload(frame);
@@ -470,10 +537,64 @@ bool OpenXrRenderer::importFfmpegHardwareBufferFrame(
     return imported;
 }
 
+void OpenXrRenderer::updateFfmpegSurfaceMetadata(const FfmpegVideoFrame& frame) {
+    if (!ffmpegVideoEnabled_) return;
+
+    const int previousKey = static_cast<int>(ffmpegSurfaceMetadata_.transfer)
+        | (static_cast<int>(ffmpegSurfaceMetadata_.primaries) << 4)
+        | (static_cast<int>(ffmpegSurfaceMetadata_.range) << 8)
+        | (ffmpegSurfaceMetadata_.dolbyProfile << 12);
+    const uint64_t previousHash = ffmpegSurfaceMetadata_.dolbyMetadata
+        ? ffmpegSurfaceMetadata_.dolbyMetadata->mappingHash
+        : 0;
+
+    ffmpegSurfaceMetadata_.width = frame.width;
+    ffmpegSurfaceMetadata_.height = frame.height;
+    ffmpegSurfaceMetadata_.pixelFormat = FfmpegVideoPixelFormat::P010;
+    ffmpegSurfaceMetadata_.transfer = frame.transfer;
+    ffmpegSurfaceMetadata_.primaries = frame.primaries;
+    ffmpegSurfaceMetadata_.range = frame.range == FfmpegVideoColorRange::Unknown
+        ? FfmpegVideoColorRange::Limited
+        : frame.range;
+    ffmpegSurfaceMetadata_.dolbyProfile = frame.dolbyProfile;
+    ffmpegSurfaceMetadata_.dolbyVision = frame.dolbyVision || frame.dolbyProfile > 0;
+    ffmpegSurfaceMetadata_.dolbyMetadata = frame.dolbyMetadata;
+    ffmpegSurfaceMetadata_.external = true;
+    ffmpegSurfaceMetadata_.valid = true;
+
+    const int currentKey = static_cast<int>(ffmpegSurfaceMetadata_.transfer)
+        | (static_cast<int>(ffmpegSurfaceMetadata_.primaries) << 4)
+        | (static_cast<int>(ffmpegSurfaceMetadata_.range) << 8)
+        | (ffmpegSurfaceMetadata_.dolbyProfile << 12);
+    const uint64_t currentHash = ffmpegSurfaceMetadata_.dolbyMetadata
+        ? ffmpegSurfaceMetadata_.dolbyMetadata->mappingHash
+        : 0;
+    if (currentKey != previousKey || currentHash != previousHash) {
+        const uint64_t currentRevision = ffmpegSurfaceMetadata_.dolbyMetadata
+            ? ffmpegSurfaceMetadata_.dolbyMetadata->revision
+            : 0;
+        XR_LOGI(
+            "DDDVR/OpenXRColor",
+            "XR_SURFACE_COLOR_METADATA size=%dx%d transfer=%d primaries=%d range=%d dolby=%d doviProfile=%d doviMetadata=%d revision=%llu hash=%llu",
+            frame.width,
+            frame.height,
+            static_cast<int>(ffmpegSurfaceMetadata_.transfer),
+            static_cast<int>(ffmpegSurfaceMetadata_.primaries),
+            static_cast<int>(ffmpegSurfaceMetadata_.range),
+            ffmpegSurfaceMetadata_.dolbyVision ? 1 : 0,
+            ffmpegSurfaceMetadata_.dolbyProfile,
+            ffmpegSurfaceMetadata_.dolbyMetadata ? 1 : 0,
+            static_cast<unsigned long long>(currentRevision),
+            static_cast<unsigned long long>(currentHash)
+        );
+    }
+}
+
 void OpenXrRenderer::setFfmpegVideoEnabled(bool enabled) {
     if (ffmpegVideoEnabled_ == enabled) return;
     ffmpegVideoEnabled_ = enabled;
     ffmpegVideoFrameSeen_ = false;
+    ffmpegSurfaceMetadata_ = {};
     if (!enabled) {
         ffmpegVideo_.destroy();
     }
@@ -631,22 +752,28 @@ void OpenXrRenderer::updateUiInteraction(
 
     if (triggerPressed != nullptr) {
         for (int hand = 0; hand < 2; ++hand) {
+            const bool triggerDown = triggerPressed[hand];
             const bool closePressed =
-                triggerPressed[hand] &&
+                triggerDown &&
                 rawUiHits[hand].hit &&
                 isPlayerUiModalClosePixel(rawUiHits[hand].pixelX, rawUiHits[hand].pixelY, modalOpen);
             if (closePressed && !uiClosePressed_[hand]) {
-                pendingUiExit_ = true;
+                VrPlayerPanelAction action{};
+                action.type = VrPlayerPanelActionType::CloseModal;
+                pendingPlayerPanelActions_.push_back(std::move(action));
                 uiAutoHideFrameBudget_ = kUiAutoHideFrames;
                 XR_LOGI(
                     "DDDVR/OpenXRUi",
-                    "XR_UI_ACTION close_direct_exit hand=%d x=%.1f y=%.1f",
+                    "XR_UI_ACTION modal_close_direct hand=%d x=%.1f y=%.1f",
                     hand,
                     rawUiHits[hand].pixelX,
                     rawUiHits[hand].pixelY
                 );
             }
-            uiClosePressed_[hand] = closePressed;
+            // Latch the physical trigger, not the hover result. A trigger held
+            // while opening a modal must not become a fresh close click on the
+            // next frame when the modal hit boxes appear under the ray.
+            uiClosePressed_[hand] = triggerDown;
         }
     } else {
         uiClosePressed_[0] = false;
@@ -1111,7 +1238,7 @@ bool OpenXrRenderer::seekProgressFromPointer(const XrPosef& aimPose, int* outPro
     const float localY = hitY - screenCenterY_;
 
     const float halfWidth = config_.screenWidthMeters * 0.5f;
-    const float halfHeight = config_.screenWidthMeters * (9.f / 16.f) * 0.5f;
+    const float halfHeight = screenHeightMeters() * 0.5f;
     const float progressWidth = halfWidth * kUiPanelWidthScale * kUiProgressWidthScale;
     const float progressHalfWidth = progressWidth * 0.5f;
     const float progressCenterY = -halfHeight + kUiPanelYOffsetMeters + kUiProgressYOffsetMeters;
@@ -1169,7 +1296,7 @@ CinemaUiHoverTarget OpenXrRenderer::playerHoverTarget(const XrPosef& aimPose) co
         const float localY = hitY - screenCenterY_;
 
         const float halfWidth = config_.screenWidthMeters * 0.5f;
-        const float halfHeight = config_.screenWidthMeters * (9.f / 16.f) * 0.5f;
+        const float halfHeight = screenHeightMeters() * 0.5f;
         if (includeVideo &&
             localX >= -halfWidth && localX <= halfWidth &&
             localY >= -halfHeight && localY <= halfHeight) {
@@ -1302,7 +1429,7 @@ void OpenXrRenderer::clampScreenCenter() {
 }
 
 VrUiPlane OpenXrRenderer::targetUiPlane() const {
-    const float screenHeight = config_.screenWidthMeters * (9.f / 16.f);
+    const float screenHeight = screenHeightMeters();
     const float c = std::cos(screenYawRadians_);
     const float s = std::sin(screenYawRadians_);
     const bool modalOpen = uiModalOpen_.load();
@@ -1337,7 +1464,7 @@ VrUiPlane OpenXrRenderer::currentScreenPlane() const {
     plane.normal = {-s, 0.f, c};
     plane.yawRadians = screenYawRadians_;
     plane.widthMeters = config_.screenWidthMeters;
-    plane.heightMeters = config_.screenWidthMeters * (9.f / 16.f);
+    plane.heightMeters = screenHeightMeters();
     return plane;
 }
 
@@ -1545,7 +1672,21 @@ void OpenXrRenderer::renderEye(int eye, int width, int height, const XrView& vie
             );
         }
     } else {
-        screen_.renderVideo(video_.id(), mvp.data(), videoTransform_, uvRectForEye(eye), hasVideoFrame_, 0.f, 0.f, 0.f);
+        const FfmpegVideoTextureSet* surfaceMetadata =
+            ffmpegVideoEnabled_ && ffmpegSurfaceMetadata_.valid
+                ? &ffmpegSurfaceMetadata_
+                : nullptr;
+        screen_.renderVideo(
+            video_.id(),
+            mvp.data(),
+            videoTransform_,
+            uvRectForEye(eye),
+            hasVideoFrame_,
+            0.f,
+            0.f,
+            0.f,
+            surfaceMetadata
+        );
     }
 #if defined(DDDVR_LEGACY_PRIMITIVE_UI)
     {

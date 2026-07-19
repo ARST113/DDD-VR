@@ -30,6 +30,8 @@ class OpenXrVideoSurface(textureId: Int) : SurfaceTexture.OnFrameAvailableListen
         }.getOrDefault(false)
     }
 
+    fun timestampNs(): Long = surfaceTexture.timestamp
+
     fun setDefaultBufferSize(width: Int, height: Int) {
         if (width > 0 && height > 0) {
             surfaceTexture.setDefaultBufferSize(width, height)

@@ -25,6 +25,7 @@ import top.rootu.dddvr.vr.activity.VrIntentParser
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
 import top.rootu.dddvr.vr.input.VrControllerInputMapper
 import top.rootu.dddvr.vr.input.VrKeyAction
+import top.rootu.dddvr.vr.model.StereoPacking
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 import top.rootu.dddvr.xr.bridge.OpenXrBridge
 import top.rootu.dddvr.xr.model.OpenXrPlaybackConfig
@@ -81,6 +82,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
     private var ffmpegVideoStartAttempt = 0
     private var lastNativeVideoWidth = 0
     private var lastNativeVideoHeight = 0
+    private var videoPixelWidthHeightRatio = 1.0f
     private var spatialAudio = false
     private var subtitlesEnabled = false
     private var xrStartAttempt = 0
@@ -118,6 +120,10 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
+        val windowAttributes = window.attributes
+        windowAttributes.screenBrightness = FOUR_XVR_WINDOW_BRIGHTNESS
+        window.attributes = windowAttributes
+        Log.i(TAG, "XR_WINDOW_BRIGHTNESS source=4xvr-1.10.2 value=$FOUR_XVR_WINDOW_BRIGHTNESS")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             window.colorMode = ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
         }
@@ -153,6 +159,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         playbackConfig = request?.let { OpenXrPlaybackConfig.from(it) }
             ?: OpenXrPlaybackConfig(
                 stereoMode = StereoInputMode.MONO,
+                stereoPacking = StereoPacking.FULL,
                 swapEyes = false,
                 screenMode = OpenXrScreenMode.FLAT,
                 startPositionMs = 0L
@@ -596,15 +603,18 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         val width = format.width
         val height = format.height
         if (width <= 0 || height <= 0) return
+        videoPixelWidthHeightRatio = format.pixelWidthHeightRatio
+            .takeIf { it.isFinite() && it > 0f }
+            ?: 1.0f
         val hdrInfo = MediaFormatHelper.getHdrInfo(format)
         currentVideoIsHdr = hdrInfo.isNotBlank()
         val hdr = hdrInfo.ifBlank { "SDR" }
         val codec = MediaFormatHelper.getShortVideoCodecName(format).ifBlank { format.sampleMimeType.orEmpty() }
         Log.i(
             TAG,
-            "XR_VIDEO_FORMAT width=$width height=$height codec=$codec hdr=$hdr autoEnhance=$currentVideoIsHdr sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate}"
+            "XR_VIDEO_FORMAT width=$width height=$height pixelRatio=$videoPixelWidthHeightRatio codec=$codec hdr=$hdr autoEnhance=$currentVideoIsHdr sampleMime=${format.sampleMimeType} codecs=${format.codecs} colorInfo=${format.colorInfo} bitrate=${format.bitrate}"
         )
-        bridge.setVideoSize(width, height)
+        bridge.setVideoSize(width, height, videoPixelWidthHeightRatio)
         updateFfmpegVideoBackend(format, width, height, "video_format")
         updateOpenXrUiState("video_format")
     }
@@ -758,8 +768,8 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
             (playback.width != lastNativeVideoWidth || playback.height != lastNativeVideoHeight)) {
             lastNativeVideoWidth = playback.width
             lastNativeVideoHeight = playback.height
-            bridge.setVideoSize(playback.width, playback.height)
-            Log.i(TAG, "XR_FFMPEG_VIDEO_SIZE width=${playback.width} height=${playback.height}")
+            bridge.setVideoSize(playback.width, playback.height, videoPixelWidthHeightRatio)
+            Log.i(TAG, "XR_FFMPEG_VIDEO_SIZE width=${playback.width} height=${playback.height} pixelRatio=$videoPixelWidthHeightRatio")
         }
         val title = playbackRequest?.title?.takeIf { it.isNotBlank() } ?: "DDD-VR OpenXR Player"
         val audioTrackRows = if (!smokeOnly && playerInitialized) {
@@ -1019,6 +1029,11 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 openXrUiVisible = true
                 Log.i(TAG, "XR_ENVIRONMENT_TOGGLE_REQUEST")
             }
+            OpenXrPlayerUiAction.CloseModal -> {
+                activeModal = OpenXrModal.NONE
+                openXrUiVisible = true
+                Log.i(TAG, "XR_PLAYER_MODAL_CLOSED")
+            }
             is OpenXrPlayerUiAction.SetSettingsTab -> {
                 activeModal = OpenXrModal.SETTINGS
                 activeSettingsTab = OpenXrSettingsTab.fromNative(action.tab)
@@ -1047,7 +1062,17 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SetAspectRatio -> {
-                aspectRatio = action.value.takeIf { it.isNotBlank() } ?: "Оригинал"
+                aspectRatio = action.value.takeIf { it.isNotBlank() } ?: aspectRatio
+                val requestedAspectRatio = when (action.value) {
+                    "4:3" -> 4f / 3f
+                    "16:9" -> 16f / 9f
+                    "16:10" -> 16f / 10f
+                    "1:1" -> 1f
+                    "21:9" -> 21f / 9f
+                    else -> 0f
+                }
+                bridge.setDisplayAspectRatio(requestedAspectRatio)
+                Log.i(TAG, "XR_VIDEO_ASPECT_UI label=${action.value} aspect=$requestedAspectRatio")
                 openXrUiVisible = true
             }
             is OpenXrPlayerUiAction.SetPlaybackSpeed -> {
@@ -1105,6 +1130,7 @@ class OpenXrPlayerActivity : Activity(), OpenXrBridge.Callbacks {
         private const val MAX_NOT_RESUMED_RETRIES = 5
         private const val MAX_SOURCE_ERROR_RETRIES = 20
         private const val SOURCE_ERROR_RETRY_DELAY_MS = 500L
+        private const val FOUR_XVR_WINDOW_BRIGHTNESS = 0.82f
         private const val PREFS_NAME = "openxr_player"
         private const val PREF_LAST_URI = "last_uri"
         private const val PREF_LAST_TITLE = "last_title"

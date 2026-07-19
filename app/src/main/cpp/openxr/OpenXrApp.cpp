@@ -80,6 +80,7 @@ void OpenXrApp::setJavaBridge(JNIEnv* env, jobject bridge) {
         videoSurfaceCtor_ = env->GetMethodID(videoSurfaceClass_, "<init>", "(I)V");
         videoSurfaceGetSurface_ = env->GetMethodID(videoSurfaceClass_, "getSurface", "()Landroid/view/Surface;");
         videoSurfaceUpdateTexImage_ = env->GetMethodID(videoSurfaceClass_, "updateTexImage", "([F)Z");
+        videoSurfaceTimestampNs_ = env->GetMethodID(videoSurfaceClass_, "timestampNs", "()J");
         videoSurfaceSetDefaultBufferSize_ = env->GetMethodID(videoSurfaceClass_, "setDefaultBufferSize", "(II)V");
         videoSurfaceRelease_ = env->GetMethodID(videoSurfaceClass_, "release", "()V");
     }
@@ -99,16 +100,33 @@ void OpenXrApp::setJavaBridge(JNIEnv* env, jobject bridge) {
         videoSurfaceCtor_ != nullptr &&
         videoSurfaceGetSurface_ != nullptr &&
         videoSurfaceUpdateTexImage_ != nullptr &&
+        videoSurfaceTimestampNs_ != nullptr &&
         videoSurfaceSetDefaultBufferSize_ != nullptr &&
         videoSurfaceRelease_ != nullptr;
     XR_LOGI("DDDVR/OpenXRVideo", "java bridge configured ok=%d", ok ? 1 : 0);
 }
 
-void OpenXrApp::setVideoSize(int32_t width, int32_t height) {
+void OpenXrApp::setVideoSize(int32_t width, int32_t height, float pixelWidthHeightRatio) {
     if (width <= 0 || height <= 0) return;
     pendingVideoWidth_ = width;
     pendingVideoHeight_ = height;
-    XR_LOGI("DDDVR/OpenXRVideo", "XR_VIDEO_SIZE_PENDING width=%d height=%d", width, height);
+    pendingVideoPixelWidthHeightRatio_ = std::isfinite(pixelWidthHeightRatio) && pixelWidthHeightRatio > 0.f
+        ? pixelWidthHeightRatio
+        : 1.f;
+    XR_LOGI(
+        "DDDVR/OpenXRVideo",
+        "XR_VIDEO_SIZE_PENDING width=%d height=%d pixelRatio=%.5f",
+        width,
+        height,
+        pendingVideoPixelWidthHeightRatio_.load()
+    );
+}
+
+void OpenXrApp::setDisplayAspectRatio(float aspectRatio) {
+    pendingDisplayAspectRatio_ = std::isfinite(aspectRatio) && aspectRatio > 0.f
+        ? aspectRatio
+        : 0.f;
+    XR_LOGI("DDDVR/OpenXRVideo", "XR_VIDEO_ASPECT_OVERRIDE_PENDING aspect=%.5f", pendingDisplayAspectRatio_.load());
 }
 
 void OpenXrApp::setUiState(
@@ -502,7 +520,21 @@ void OpenXrApp::loop() {
         FfmpegHardwareBufferFrame ffmpegHardwareFrame{};
         FfmpegVideoFrame ffmpegFrame{};
         bool ffmpegVideoUpdated = false;
-        if (ffmpegVideoDecoder_.pollHardwareBufferFrame(&ffmpegHardwareFrame)) {
+        const bool videoUpdated = updateVideoSurfaceOnRenderThread();
+        const int64_t surfacePtsUs = videoSurfaceTimestampNsValue_ >= 0
+            ? videoSurfaceTimestampNsValue_ / 1000
+            : -1;
+        if (ffmpegVideoDecoder_.pollHardwareSurfaceMetadata(&ffmpegFrame, surfacePtsUs)) {
+            renderer_.updateFfmpegSurfaceMetadata(ffmpegFrame);
+            ffmpegFrame = {};
+        }
+        if (ffmpegVideoDecoder_.pollDirectFrame(&ffmpegFrame)) {
+            ffmpegVideoUpdated = renderer_.uploadFfmpegVideoFrame(ffmpegFrame);
+            ffmpegVideoDecoder_.releaseDirectFrame();
+            if (ffmpegVideoUpdated) {
+                lastFfmpegVideoUploadTime = std::chrono::steady_clock::now();
+            }
+        } else if (ffmpegVideoDecoder_.pollHardwareBufferFrame(&ffmpegHardwareFrame)) {
             ffmpegVideoUpdated = renderer_.importFfmpegHardwareBufferFrame(
                 std::move(ffmpegHardwareFrame)
             );
@@ -532,7 +564,6 @@ void OpenXrApp::loop() {
                 }
             }
         }
-        const bool videoUpdated = updateVideoSurfaceOnRenderThread();
         renderer_.setVideoFrameState(videoTransform_, videoUpdated);
         if (ffmpegVideoUpdated) {
             renderer_.setVideoFrameState(nullptr, true);
@@ -547,11 +578,14 @@ void OpenXrApp::loop() {
                 }
                 if (srgbWriteControlSupported == 1) {
                     const bool enabledBefore = glIsEnabled(kFramebufferSrgbExt) == GL_TRUE;
-                    glDisable(kFramebufferSrgbExt);
+                    // Default projection rendering uses normal sRGB writes.
+                    // The video renderer temporarily disables this state for
+                    // the exact 4XVR HDR pass and restores it before VR UI.
+                    glEnable(kFramebufferSrgbExt);
                     if (!srgbWriteControlLogged) {
                         XR_LOGI(
                             "DDDVR/OpenXRColor",
-                            "XR_SRGB_WRITE_CONTROL extension=1 before=%d after=%d glError=0x%x",
+                            "XR_SRGB_WRITE_CONTROL extension=1 mode=fourxvr_linear_to_srgb before=%d after=%d glError=0x%x",
                             enabledBefore ? 1 : 0,
                             glIsEnabled(kFramebufferSrgbExt) == GL_TRUE ? 1 : 0,
                             glGetError()
@@ -892,6 +926,13 @@ bool OpenXrApp::updateVideoSurfaceOnRenderThread() {
 
     if (updated == JNI_TRUE) {
         env->GetFloatArrayRegion(videoTransformArray_, 0, 16, videoTransform_);
+        videoSurfaceTimestampNsValue_ = static_cast<int64_t>(
+            env->CallLongMethod(videoSurfaceRef_, videoSurfaceTimestampNs_)
+        );
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            videoSurfaceTimestampNsValue_ = -1;
+        }
         videoFrameUpdateCount_ += 1;
         const auto now = std::chrono::steady_clock::now();
         if (videoFrameStatsStart_.time_since_epoch().count() == 0) {
@@ -923,10 +964,26 @@ bool OpenXrApp::updateVideoSurfaceOnRenderThread() {
 }
 
 void OpenXrApp::applyPendingVideoSizeOnRenderThread(JNIEnv* env) {
-    if (env == nullptr || videoSurfaceRef_ == nullptr || videoSurfaceSetDefaultBufferSize_ == nullptr) return;
     const int32_t width = pendingVideoWidth_.load();
     const int32_t height = pendingVideoHeight_.load();
     if (width <= 0 || height <= 0) return;
+    const float pixelWidthHeightRatio = pendingVideoPixelWidthHeightRatio_.load();
+    if (width != appliedRendererVideoWidth_ ||
+        height != appliedRendererVideoHeight_ ||
+        std::fabs(pixelWidthHeightRatio - appliedRendererPixelWidthHeightRatio_) > 0.0001f) {
+        renderer_.setVideoSize(width, height, pixelWidthHeightRatio);
+        appliedRendererVideoWidth_ = width;
+        appliedRendererVideoHeight_ = height;
+        appliedRendererPixelWidthHeightRatio_ = pixelWidthHeightRatio;
+    }
+
+    const float displayAspectRatio = pendingDisplayAspectRatio_.load();
+    if (std::fabs(displayAspectRatio - appliedDisplayAspectRatio_) > 0.0001f) {
+        renderer_.setDisplayAspectRatio(displayAspectRatio);
+        appliedDisplayAspectRatio_ = displayAspectRatio;
+    }
+
+    if (env == nullptr || videoSurfaceRef_ == nullptr || videoSurfaceSetDefaultBufferSize_ == nullptr) return;
     if (width == appliedVideoWidth_ && height == appliedVideoHeight_) return;
     env->CallVoidMethod(videoSurfaceRef_, videoSurfaceSetDefaultBufferSize_, width, height);
     if (env->ExceptionCheck()) {
@@ -962,6 +1019,7 @@ void OpenXrApp::releaseVideoSurfaceOnRenderThread() {
         }
     }
     detachCurrentThread(didAttach);
+    videoSurfaceTimestampNsValue_ = -1;
     videoFrameSeen_ = false;
     videoFrameUpdateCount_ = 0;
     videoFrameStatsBaseCount_ = 0;
@@ -1005,6 +1063,7 @@ void OpenXrApp::releaseJavaRefs() {
     videoSurfaceCtor_ = nullptr;
     videoSurfaceGetSurface_ = nullptr;
     videoSurfaceUpdateTexImage_ = nullptr;
+    videoSurfaceTimestampNs_ = nullptr;
     videoSurfaceSetDefaultBufferSize_ = nullptr;
     videoSurfaceRelease_ = nullptr;
     detachCurrentThread(didAttach);

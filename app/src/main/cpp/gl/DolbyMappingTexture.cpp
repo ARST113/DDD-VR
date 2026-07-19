@@ -13,7 +13,7 @@ constexpr int kLut3DEdge = 16;
 constexpr double kBt2020RgbToLmsHpe[9] = {
     0.4407958984375, 0.53533935546875, 0.0238037109375,
     0.1619873046875, 0.7586669921875, 0.079345703125,
-    0.0, 0.0257568359375, 0.96877145767211914
+    0.0, 0.0257568359375, 0.9742431640625
 };
 
 uint64_t hashBytes(uint64_t hash, const void* data, size_t size) {
@@ -123,8 +123,7 @@ double evaluateMmr(
 ) {
     const double basis[7] = {x, y, z, x * y, x * z, y * z, x * y * z};
     double result = static_cast<double>(curve.mmr_constant[0]) / scale;
-    const int order = std::clamp<int>(curve.mmr_order[0], 0, 3);
-    for (int row = 0; row < order; ++row) {
+    for (int row = 0; row < 3; ++row) {
         for (int coefficient = 0; coefficient < 7; ++coefficient) {
             double term = basis[coefficient];
             if (row == 1) term *= term;
@@ -234,7 +233,7 @@ bool DolbyMappingTexture::upload2D(int channel, const float* values, int count) 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, count, 1, 0, GL_RED, GL_FLOAT, values);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, count, 1, 0, GL_RED, GL_FLOAT, values);
     return glGetError() == GL_NO_ERROR;
 }
 
@@ -246,7 +245,7 @@ bool DolbyMappingTexture::upload3D(int channel, const float* values, int edge) {
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, edge, edge, edge, 0, GL_RED, GL_FLOAT, values);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_R16F, edge, edge, edge, 0, GL_RED, GL_FLOAT, values);
     return glGetError() == GL_NO_ERROR;
 }
 

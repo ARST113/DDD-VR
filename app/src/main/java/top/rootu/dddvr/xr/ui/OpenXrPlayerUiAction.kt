@@ -6,6 +6,7 @@ sealed class OpenXrPlayerUiAction {
     object ToggleVolume : OpenXrPlayerUiAction()
     object ToggleProjectionMenu : OpenXrPlayerUiAction()
     object ToggleEnvironment : OpenXrPlayerUiAction()
+    object CloseModal : OpenXrPlayerUiAction()
 
     data class SetSettingsTab(val tab: Int) : OpenXrPlayerUiAction()
     data class SelectAudioTrack(val id: String) : OpenXrPlayerUiAction()
@@ -34,6 +35,7 @@ sealed class OpenXrPlayerUiAction {
                 102 -> ToggleVolume
                 103 -> ToggleProjectionMenu
                 104 -> ToggleEnvironment
+                105 -> CloseModal
                 110 -> SetSettingsTab(intValue)
                 120 -> SelectAudioTrack(stringValue.orEmpty())
                 121 -> SelectSubtitleTrack(stringValue.orEmpty())

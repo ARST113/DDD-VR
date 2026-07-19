@@ -247,11 +247,18 @@ OpenXrScreenModeNative parseScreenMode(const std::string& name) {
     return OpenXrScreenModeNative::Flat;
 }
 
+OpenXrStereoPackingNative parseStereoPacking(const std::string& name) {
+    return name == "HALF"
+        ? OpenXrStereoPackingNative::Half
+        : OpenXrStereoPackingNative::Full;
+}
+
 OpenXrRenderConfig parseRenderConfig(JNIEnv* env, jobject config) {
     OpenXrRenderConfig out{};
     if (env == nullptr || config == nullptr) return out;
     jclass configClass = env->GetObjectClass(config);
     jmethodID getStereoMode = env->GetMethodID(configClass, "getStereoMode", "()Ltop/rootu/dddvr/vr/stereo/StereoInputMode;");
+    jmethodID getStereoPacking = env->GetMethodID(configClass, "getStereoPacking", "()Ltop/rootu/dddvr/vr/model/StereoPacking;");
     jmethodID getScreenMode = env->GetMethodID(configClass, "getScreenMode", "()Ltop/rootu/dddvr/xr/model/OpenXrScreenMode;");
     jmethodID getSwapEyes = env->GetMethodID(configClass, "getSwapEyes", "()Z");
     jmethodID getScreenDistance = env->GetMethodID(configClass, "getScreenDistanceMeters", "()F");
@@ -268,6 +275,18 @@ OpenXrRenderConfig parseRenderConfig(JNIEnv* env, jobject config) {
         }
         if (enumClass != nullptr) env->DeleteLocalRef(enumClass);
         if (stereoMode != nullptr) env->DeleteLocalRef(stereoMode);
+    }
+    if (getStereoPacking != nullptr) {
+        jobject stereoPacking = env->CallObjectMethod(config, getStereoPacking);
+        jclass enumClass = env->FindClass("java/lang/Enum");
+        jmethodID nameMethod = enumClass != nullptr ? env->GetMethodID(enumClass, "name", "()Ljava/lang/String;") : nullptr;
+        if (stereoPacking != nullptr && nameMethod != nullptr) {
+            jstring name = reinterpret_cast<jstring>(env->CallObjectMethod(stereoPacking, nameMethod));
+            out.stereoPacking = parseStereoPacking(toString(env, name));
+            if (name != nullptr) env->DeleteLocalRef(name);
+        }
+        if (enumClass != nullptr) env->DeleteLocalRef(enumClass);
+        if (stereoPacking != nullptr) env->DeleteLocalRef(stereoPacking);
     }
     if (getScreenMode != nullptr) {
         jobject screenMode = env->CallObjectMethod(config, getScreenMode);
@@ -344,7 +363,28 @@ Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeResume(JNIEnv*, jobject, jlong
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativePause(JNIEnv*, jobject, jlong handle) { XR_LOGI("DDDVR/OpenXR", "nativePause called"); auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->pause(); }
 extern "C" JNIEXPORT void JNICALL
-Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetVideoSize(JNIEnv*, jobject, jlong handle, jint width, jint height) { auto* app = reinterpret_cast<OpenXrApp*>(handle); if (app) app->setVideoSize(width, height); }
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetVideoSize(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint width,
+    jint height,
+    jfloat pixelWidthHeightRatio
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app) app->setVideoSize(width, height, pixelWidthHeightRatio);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetDisplayAspectRatio(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat aspectRatio
+) {
+    auto* app = reinterpret_cast<OpenXrApp*>(handle);
+    if (app) app->setDisplayAspectRatio(aspectRatio);
+}
 extern "C" JNIEXPORT void JNICALL
 Java_top_rootu_dddvr_xr_bridge_OpenXrBridge_nativeSetUiState(
     JNIEnv* env,

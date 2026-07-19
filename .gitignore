@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Local Pico/4XVR investigation output.
+/artifacts/
+
+# Host-side metadata and examples copied by the FFmpeg install step.
+/app/src/main/ffmpeg/arm64-v8a/pkgconfig/
+/app/src/main/ffmpeg/share/

@@ -31,8 +31,14 @@ enum class OpenXrScreenModeNative {
     Vr360
 };
 
+enum class OpenXrStereoPackingNative {
+    Full,
+    Half
+};
+
 struct OpenXrRenderConfig {
     OpenXrStereoMode stereoMode = OpenXrStereoMode::Mono;
+    OpenXrStereoPackingNative stereoPacking = OpenXrStereoPackingNative::Full;
     OpenXrScreenModeNative screenMode = OpenXrScreenModeNative::Flat;
     bool swapEyes = false;
     float screenDistanceMeters = 3.5f;
@@ -44,8 +50,11 @@ class OpenXrRenderer {
 public:
     bool initialize(const OpenXrRenderConfig& config);
     void setVideoFrameState(const float* transformMatrix, bool hasVideo);
+    void setVideoSize(int width, int height, float pixelWidthHeightRatio);
+    void setDisplayAspectRatio(float aspectRatio);
     bool uploadFfmpegVideoFrame(const FfmpegVideoFrame& frame);
     bool importFfmpegHardwareBufferFrame(FfmpegHardwareBufferFrame&& frame);
+    void updateFfmpegSurfaceMetadata(const FfmpegVideoFrame& frame);
     void setFfmpegVideoEnabled(bool enabled);
     void setUiState(
         bool visible,
@@ -96,9 +105,11 @@ private:
     void queuePlayerPanelActions();
     void renderUiCursor(const float* mvp, const VrRayHit& hit, const VrUiPlane& plane);
     CinemaUvRect uvRectForEye(int eye) const;
+    float screenHeightMeters() const;
     OpenXrRenderConfig config_;
     ExternalOesVideoTexture video_;
     FfmpegVideoTexture ffmpegVideo_;
+    FfmpegVideoTextureSet ffmpegSurfaceMetadata_{};
     bool ffmpegVideoEnabled_ = false;
     bool ffmpegVideoFrameSeen_ = false;
     CinemaScreenRenderer screen_;
@@ -130,6 +141,12 @@ private:
     float screenCenterY_ = 0.f;
     float screenCenterZ_ = -3.5f;
     float screenCurveRadians_ = 0.45f;
+    int videoWidth_ = 0;
+    int videoHeight_ = 0;
+    float pixelWidthHeightRatio_ = 1.f;
+    float originalDisplayAspectRatio_ = 16.f / 9.f;
+    float displayAspectRatioOverride_ = 0.f;
+    float displayAspectRatio_ = 16.f / 9.f;
     float uiPanelOffsetX_ = 0.f;
     float uiPanelOffsetY_ = 0.f;
     float uiPanelDragStartPixelX_ = 0.f;

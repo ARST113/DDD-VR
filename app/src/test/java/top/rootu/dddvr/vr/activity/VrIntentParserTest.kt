@@ -13,6 +13,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
+import top.rootu.dddvr.vr.model.StereoPacking
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 
 class VrIntentParserTest {
@@ -166,6 +167,27 @@ class VrIntentParserTest {
 
         requireNotNull(parsed)
         assertEquals(StereoInputMode.SBS, parsed.stereoInputMode)
+        assertEquals(StereoPacking.FULL, parsed.vrConfig.stereoPacking)
+    }
+
+    @Test
+    fun `infers half packing from hou filename`() {
+        val intent = mockedIntent(uriLastPathSegment = "Avatar 2 (2022) 3D-hOU.mkv")
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoPacking.HALF, parsed.vrConfig.stereoPacking)
+    }
+
+    @Test
+    fun `defaults generic stereo layout to common half packing`() {
+        val intent = mockedIntent(stringExtras = mapOf("stereo_layout" to "sbs"))
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoPacking.HALF, parsed.vrConfig.stereoPacking)
     }
 
     @Test
@@ -194,5 +216,18 @@ class VrIntentParserTest {
         requireNotNull(v2Parsed)
         assertEquals(StereoInputMode.VR_CAM_V1, v1Parsed.stereoInputMode)
         assertEquals(StereoInputMode.VR_CAM_V2, v2Parsed.stereoInputMode)
+        assertEquals(StereoPacking.FULL, v1Parsed.vrConfig.stereoPacking)
+        assertEquals(StereoPacking.FULL, v2Parsed.vrConfig.stereoPacking)
+    }
+
+    @Test
+    fun `parses explicit full over under alias and packing`() {
+        val intent = mockedIntent(stringExtras = mapOf("stereo_mode" to "full_ou"))
+
+        val parsed = VrIntentParser.parse(intent)
+
+        requireNotNull(parsed)
+        assertEquals(StereoInputMode.OU, parsed.stereoInputMode)
+        assertEquals(StereoPacking.FULL, parsed.vrConfig.stereoPacking)
     }
 }

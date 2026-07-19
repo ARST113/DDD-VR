@@ -46,9 +46,14 @@ class OpenXrBridge(
         nativePause(nativeHandle)
     }
 
-    fun setVideoSize(width: Int, height: Int) {
+    fun setVideoSize(width: Int, height: Int, pixelWidthHeightRatio: Float = 1.0f) {
         if (nativeHandle == 0L || width <= 0 || height <= 0) return
-        nativeSetVideoSize(nativeHandle, width, height)
+        nativeSetVideoSize(nativeHandle, width, height, pixelWidthHeightRatio)
+    }
+
+    fun setDisplayAspectRatio(aspectRatio: Float) {
+        if (nativeHandle == 0L) return
+        nativeSetDisplayAspectRatio(nativeHandle, aspectRatio)
     }
 
     fun setUiState(
@@ -205,7 +210,13 @@ class OpenXrBridge(
     private external fun nativeStart(handle: Long): Boolean
     private external fun nativeResume(handle: Long)
     private external fun nativePause(handle: Long)
-    private external fun nativeSetVideoSize(handle: Long, width: Int, height: Int)
+    private external fun nativeSetVideoSize(
+        handle: Long,
+        width: Int,
+        height: Int,
+        pixelWidthHeightRatio: Float
+    )
+    private external fun nativeSetDisplayAspectRatio(handle: Long, aspectRatio: Float)
     private external fun nativeSetUiState(
         handle: Long,
         visible: Boolean,

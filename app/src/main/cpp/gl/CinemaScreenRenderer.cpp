@@ -2,6 +2,8 @@
 #include "../util/XrLog.h"
 #include <cmath>
 #include <algorithm>
+#include <cstdlib>
+#include <sys/system_properties.h>
 #include <vector>
 
 namespace {
@@ -15,32 +17,130 @@ constexpr float kUiProgressWidthScale = 0.74f;
 constexpr float kUiPlayButtonWidthMeters = 0.34f;
 constexpr float kUiPlayButtonHeightMeters = 0.18f;
 constexpr float kUiPlayButtonYOffsetMeters = 0.055f;
+constexpr GLenum kFramebufferSrgbExt = 0x8DB9;
 
-constexpr float kFourXvrHdrBrightness = 0.5f;
-constexpr float kFourXvrHdrSmoothBase = 0.3996094f;
+// Matches the HDR level used by the reference 4XVR installation on Pico.
+constexpr float kFourXvrHdrBrightness = 0.7f;
+constexpr float kFourXvrHdrSmoothBase = 0.355f;
+
+float fourXvrProperty(const char* name, float fallback, float minimum, float maximum) {
+    char value[PROP_VALUE_MAX] = {};
+    if (__system_property_get(name, value) <= 0) {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value || !std::isfinite(parsed)) {
+        return fallback;
+    }
+    return std::clamp(parsed, minimum, maximum);
+}
+
+float fourXvrHdrBrightness() {
+    return fourXvrProperty(
+        "debug.dddvr.hdr_brightness",
+        kFourXvrHdrBrightness,
+        0.f,
+        1.f
+    );
+}
+
+// Active saved color-correction profile measured from the reference 4XVR
+// installation on the same Pico headset.
+constexpr GLfloat kFourXvrPicoColorFix[4] = {
+    1.0030146609f,
+    0.8853443490f,
+    0.8557648182f,
+    1.0f
+};
 
 struct FourXvrHdrProfile {
     float saturationPower;
     float gammaPower;
     float smoothAmount;
     float brightness;
+    float highlightCompression;
 };
 
 FourXvrHdrProfile makeFourXvrHdrProfile(bool dolbyVision) {
+    const float hdrBrightness = fourXvrHdrBrightness();
     const float saturationBase = dolbyVision ? 0.53f : 0.65f;
+    const float smoothAmount = fourXvrProperty(
+        "debug.dddvr.hdr_smooth",
+        kFourXvrHdrSmoothBase + (hdrBrightness - 0.5f) * 0.8f,
+        0.f,
+        1.f
+    );
     return {
-        saturationBase + kFourXvrHdrBrightness * 0.4f,
-        0.42f + kFourXvrHdrBrightness * -0.14f,
-        kFourXvrHdrSmoothBase + std::max(kFourXvrHdrBrightness - 0.5f, 0.f) * 0.8f,
-        kFourXvrHdrBrightness
+        saturationBase + hdrBrightness * 0.4f,
+        0.42f + hdrBrightness * -0.14f,
+        smoothAmount,
+        hdrBrightness,
+        fourXvrProperty("debug.dddvr.hdr_highlight_compression", 0.04f, 0.f, 0.25f)
     };
 }
 
-constexpr GLfloat kIdentityColorMatrix[16] = {
-    1.f, 0.f, 0.f, 0.f,
-    0.f, 1.f, 0.f, 0.f,
-    0.f, 0.f, 1.f, 0.f,
-    0.f, 0.f, 0.f, 1.f
+struct FourXvrDisplayProfile {
+    GLfloat colorMatrix[16];
+    GLfloat colorFix[4];
+    float saturation;
+    float contrast;
+    float brightness;
+};
+
+FourXvrDisplayProfile makeFourXvrDisplayProfile() {
+    const float saturation = fourXvrProperty(
+        "debug.dddvr.hdr_saturation", 0.5374f, 0.f, 1.f
+    );
+    const float contrast = fourXvrProperty(
+        "debug.dddvr.hdr_contrast", 0.5f, 0.f, 1.f
+    );
+    const float brightness = fourXvrProperty(
+        "debug.dddvr.hdr_matrix_brightness", 0.475f, 0.f, 1.f
+    );
+
+    // Exact algebra used by 4XVR GetSatConMatrix(saturation, contrast,
+    // brightness). The native implementation composes a 0.33/0.34/0.33
+    // saturation matrix, a centered contrast transform and an EV-style
+    // brightness scale.
+    const float saturationScale = saturation * 2.f;
+    const float contrastScale = contrast * 2.f;
+    const float brightnessScale = std::exp2(brightness - 0.5f);
+    const float scale = contrastScale * brightnessScale;
+    const float redLuma = 0.33f * (1.f - saturationScale);
+    const float greenLuma = 0.34f * (1.f - saturationScale);
+    const float blueLuma = 0.33f * (1.f - saturationScale);
+    const float offset = 0.5f * (1.f - contrastScale);
+
+    FourXvrDisplayProfile profile = {
+        {
+            (redLuma + saturationScale) * scale, redLuma * scale, redLuma * scale, 0.f,
+            greenLuma * scale, (greenLuma + saturationScale) * scale, greenLuma * scale, 0.f,
+            blueLuma * scale, blueLuma * scale, (blueLuma + saturationScale) * scale, 0.f,
+            offset, offset, offset, 1.f
+        },
+        {
+            fourXvrProperty("debug.dddvr.colorfix_r", kFourXvrPicoColorFix[0], 0.5f, 1.5f),
+            fourXvrProperty("debug.dddvr.colorfix_g", kFourXvrPicoColorFix[1], 0.5f, 1.5f),
+            fourXvrProperty("debug.dddvr.colorfix_b", kFourXvrPicoColorFix[2], 0.5f, 1.5f),
+            1.f
+        },
+        saturation,
+        contrast,
+        brightness
+    };
+    return profile;
+}
+
+// Inverse of 4XVR GetYUVMatrix(range=limited, colorspace=BT.2020).
+// SurfaceTexture exposes decoded YUV as RGB, while the Dolby reshaping LUTs
+// operate on the original limited-range Y'CbCr code values.
+constexpr GLfloat kFourXvrBt2020LimitedRgbToYuv[16] = {
+     0.2256129418f,  0.5822823515f,  0.0509282361f, 0.0627450982f,
+    -0.1226554280f, -0.3165602579f,  0.4392156858f, 0.5019607844f,
+     0.4392156858f, -0.4038901866f, -0.0353254993f, 0.5019607841f,
+     0.f, 0.f, 0.f, 1.f
 };
 }
 
@@ -82,12 +182,14 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         "uniform sampler3D uDolbyCt3D;"
         "uniform sampler3D uDolbyCp3D;"
         "uniform bool uDolbyColorEnabled;"
+        "uniform mat4 uDolbyInputColorInverse;"
         "uniform mat3 uDolbyYccToRgb;"
         "uniform vec3 uDolbyYccOffset;"
         "uniform mat3 uDolbyColorMatrix;"
         "uniform bool uDolbyBlFullRange;"
         "uniform vec4 uHdrPowerValue;"
         "uniform mat4 uHdrColorMat;"
+        "uniform vec4 uColorFix;"
         "out vec4 fragColor;"
         "const float ST_M1=1.0/0.1593017578125;"
         "const float ST_M2=1.0/78.84375;"
@@ -116,25 +218,32 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         "  vec4 d3=d2*inColor;"
         "  return d3*t3+d2*t2+inColor*t1;"
         "}"
+        "vec3 v4CompressHighlights(vec3 color){"
+        "  float peak=max(color.r,max(color.g,color.b));"
+        "  float shoulder=smoothstep(0.72,1.0,peak);"
+        "  float target=peak*(1.0-uHdrPowerValue.w*shoulder*shoulder);"
+        "  return color*(target/max(peak,1e-6));"
+        "}"
         "vec3 v4MapHdrPq(vec3 pq){"
-        "  vec3 linear=st2084(pq);"
+        "  vec3 linear=st2084(clamp(pq,vec3(0.0),vec3(1.0)));"
         "  float lum=max(max(linear.r,linear.g),linear.b);"
         "  float scale=hable(lum)/max(lum,1e-6);"
         "  vec3 tm=linear*scale*vec3(100.0,93.0,100.0)*0.70;"
         "  vec4 rv=pow(vec4(tm,1.0),vec4(uHdrPowerValue.y,uHdrPowerValue.y,uHdrPowerValue.y,1.0));"
         "  vec4 inColor=clamp(vec4(v4Rgb2Sat(rv.rgb),1.0)*uHdrColorMat,vec4(0.0),vec4(1.0));"
-        "  return v4SmoothColor(inColor).rgb;"
+        "  return v4CompressHighlights(v4SmoothColor(inColor).rgb);"
         "}"
         "vec3 v4MapDolbyPq(vec3 pq){"
-        "  vec3 linear=st2084(pq);"
+        "  vec3 linear=st2084(clamp(pq,vec3(0.0),vec3(1.0)));"
         "  if(uDolbyColorEnabled) linear=linear*uDolbyColorMatrix;"
         "  linear=clamp(linear,vec3(0.0),vec3(1.0));"
         "  float lum=max(max(linear.r,linear.g),linear.b);"
         "  float scale=hable(lum)/max(lum,1e-6);"
         "  vec3 tm=linear*scale*vec3(100.0,93.0,100.0)*0.70;"
         "  vec4 rv=pow(vec4(tm,1.0),vec4(uHdrPowerValue.y,uHdrPowerValue.y,uHdrPowerValue.y,1.0));"
+        "  if(uDolbyProfile==4) rv*=4.0;"
         "  vec4 inColor=clamp(vec4(v4Rgb2Sat(rv.rgb),1.0)*uHdrColorMat,vec4(0.0),vec4(1.0));"
-        "  return v4SmoothColor(inColor).rgb;"
+        "  return v4CompressHighlights(v4SmoothColor(inColor).rgb);"
         "}"
         "vec3 v4RgbToBt2020Ycc(vec3 rgb){"
         " float y=dot(rgb,vec3(0.2627,0.6780,0.0593));"
@@ -145,6 +254,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         " return vec3(y+1.4746*v,y-0.16455*u-0.57135*v,y+1.8814*u);"
         "}"
         "vec3 v4RgbToDolbyCode(vec3 rgb){"
+        " if(uDolbyColorEnabled) return (vec4(rgb,1.0)*uDolbyInputColorInverse).rgb;"
         " vec3 ycc=v4RgbToBt2020Ycc(rgb);"
         " if(uDolbyBlFullRange) return ycc;"
         " return vec3(ycc.r*(219.0/255.0)+(16.0/255.0),(ycc.g-0.5)*(224.0/255.0)+(128.0/255.0),(ycc.b-0.5)*(224.0/255.0)+(128.0/255.0));"
@@ -160,9 +270,9 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         " if(!uDolbyMappingEnabled) return rgb;"
         " vec3 ycc=clamp(v4RgbToDolbyCode(rgb),0.0,1.0);"
         " vec3 mapped;"
-        " mapped.r=(uDolbyMappingKind.x==2)?texture(uDolbyI3D,ycc).r:texture(uDolbyI2D,vec2(ycc.r,0.5)).r;"
-        " mapped.g=(uDolbyMappingKind.y==2)?texture(uDolbyCt3D,ycc).r:texture(uDolbyCt2D,vec2(ycc.g,0.5)).r;"
-        " mapped.b=(uDolbyMappingKind.z==2)?texture(uDolbyCp3D,ycc).r:texture(uDolbyCp2D,vec2(ycc.b,0.5)).r;"
+        " mapped.r=(uDolbyMappingKind.x==2)?texture(uDolbyI3D,ycc).r:texture(uDolbyI2D,vec2(ycc.r,0.0)).r;"
+        " mapped.g=(uDolbyMappingKind.y==2)?texture(uDolbyCt3D,ycc).r:texture(uDolbyCt2D,vec2(ycc.g,0.0)).r;"
+        " mapped.b=(uDolbyMappingKind.z==2)?texture(uDolbyCp3D,ycc).r:texture(uDolbyCp2D,vec2(ycc.b,0.0)).r;"
         " return v4DolbyCodeToRgb(mapped);"
         "}"
         "vec3 v4HlgSat(vec3 c){"
@@ -195,17 +305,18 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         "  vec4 sampleColor=texture(uTexture,uv);"
         "  vec3 color=v4ApplyDolbyMapping(sampleColor.rgb);"
         "  if(uTransfer==2){"
-        "    color=(uDolbyProfile>0 && uDolbyColorEnabled)?v4MapDolbyPq(color):v4MapHdrPq(color);"
+        "    color=(uDolbyProfile>0)?v4MapDolbyPq(color):v4MapHdrPq(color);"
         "  } else if(uTransfer==3){"
         "    color=v4MapHlg(color);"
         "  } else {"
+        "    color=(vec4(color,1.0)*uHdrColorMat).rgb;"
         "    color=max(color*uColorParams.x,vec3(0.0));"
         "    color=(color-vec3(0.5))*uColorParams.y+vec3(0.5);"
         "    float luma=dot(color,vec3(0.2126,0.7152,0.0722));"
         "    color=mix(vec3(luma),color,uColorParams.z);"
         "    color=pow(max(color,vec3(0.0)),vec3(uColorParams.w));"
         "  }"
-        "  fragColor=vec4(clamp(color,0.0,1.0), sampleColor.a);"
+        "  fragColor=vec4(clamp(color,0.0,1.0), sampleColor.a)*uColorFix;"
         "}";
     GLuint v=compileShader(GL_VERTEX_SHADER,vs), f=compileShader(GL_FRAGMENT_SHADER,fs);
     program_ = glCreateProgram(); glAttachShader(program_,v); glAttachShader(program_,f); glLinkProgram(program_);
@@ -222,6 +333,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
     dolbyProfileLoc_=glGetUniformLocation(program_,"uDolbyProfile");
     hdrPowerValueLoc_=glGetUniformLocation(program_,"uHdrPowerValue");
     hdrColorMatrixLoc_=glGetUniformLocation(program_,"uHdrColorMat");
+    colorFixLoc_=glGetUniformLocation(program_,"uColorFix");
     dolbyMappingEnabledLoc_=glGetUniformLocation(program_,"uDolbyMappingEnabled");
     dolbyMappingKindLoc_=glGetUniformLocation(program_,"uDolbyMappingKind");
     dolbySampler2DLoc_[0]=glGetUniformLocation(program_,"uDolbyI2D");
@@ -231,6 +343,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
     dolbySampler3DLoc_[1]=glGetUniformLocation(program_,"uDolbyCt3D");
     dolbySampler3DLoc_[2]=glGetUniformLocation(program_,"uDolbyCp3D");
     dolbyColorEnabledLoc_=glGetUniformLocation(program_,"uDolbyColorEnabled");
+    dolbyInputColorInverseLoc_=glGetUniformLocation(program_,"uDolbyInputColorInverse");
     dolbyYccToRgbLoc_=glGetUniformLocation(program_,"uDolbyYccToRgb");
     dolbyYccOffsetLoc_=glGetUniformLocation(program_,"uDolbyYccOffset");
     dolbyColorMatrixLoc_=glGetUniformLocation(program_,"uDolbyColorMatrix");
@@ -239,12 +352,11 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
     const char* ffmpegFs =
         "#version 300 es\n"
         "precision highp float;"
-        "precision highp int;"
-        "precision highp usampler2D;"
+        "precision highp sampler2D;"
         "in vec2 vTexCoord;"
-        "uniform usampler2D uPlane0;"
-        "uniform usampler2D uPlane1;"
-        "uniform usampler2D uPlane2;"
+        "uniform sampler2D uPlane0;"
+        "uniform sampler2D uPlane1;"
+        "uniform sampler2D uPlane2;"
         "uniform vec4 uUvRect;"
         "uniform bool uHasVideo;"
         "uniform vec3 uFallbackColor;"
@@ -270,6 +382,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         "uniform bool uDolbyBlFullRange;"
         "uniform vec4 uHdrPowerValue;"
         "uniform mat4 uHdrColorMat;"
+        "uniform vec4 uColorFix;"
         "out vec4 fragColor;"
         "const float ST_M1=1.0/0.1593017578125;"
         "const float ST_M2=1.0/78.84375;"
@@ -294,34 +407,41 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         " vec4 d2=c*c; vec4 d3=d2*c;"
         " return d3*(-2.0*uHdrPowerValue.z)+d2*(3.0*uHdrPowerValue.z)+c*(1.0-uHdrPowerValue.z);"
         "}"
+        "vec3 compressHighlights(vec3 color){"
+        " float peak=max(color.r,max(color.g,color.b));"
+        " float shoulder=smoothstep(0.72,1.0,peak);"
+        " float target=peak*(1.0-uHdrPowerValue.w*shoulder*shoulder);"
+        " return color*(target/max(peak,1e-6));"
+        "}"
         "vec3 toneMap(vec3 linear){"
         " float lum=max(max(linear.r,linear.g),linear.b);"
         " float scale=hable(lum)/max(lum,1e-6);"
         " return linear*scale*vec3(100.0,93.0,100.0)*0.70;"
         "}"
         "vec3 mapHdrPq(vec3 rgb){"
-        " vec3 linear=st2084(rgb);"
+        " vec3 linear=st2084(clamp(rgb,vec3(0.0),vec3(1.0)));"
         " vec3 tm=toneMap(linear);"
         " vec4 rv=pow(vec4(tm,1.0),vec4(uHdrPowerValue.y,uHdrPowerValue.y,uHdrPowerValue.y,1.0));"
         " vec4 inColor=clamp(vec4(rgb2sat(rv.rgb),1.0)*uHdrColorMat,vec4(0.0),vec4(1.0));"
-        " return smoothColor(inColor).rgb;"
+        " return compressHighlights(smoothColor(inColor).rgb);"
         "}"
         "vec3 mapDolbyPq(vec3 rgb){"
-        " vec3 linear=st2084(rgb);"
+        " vec3 linear=st2084(clamp(rgb,vec3(0.0),vec3(1.0)));"
         " if(uDolbyColorEnabled) linear=linear*uDolbyColorMatrix;"
         " linear=clamp(linear,vec3(0.0),vec3(1.0));"
         " vec3 tm=toneMap(linear);"
         " vec4 rv=pow(vec4(tm,1.0),vec4(uHdrPowerValue.y,uHdrPowerValue.y,uHdrPowerValue.y,1.0));"
+        " if(uDolbyProfile==4) rv*=4.0;"
         " vec4 inColor=clamp(vec4(rgb2sat(rv.rgb),1.0)*uHdrColorMat,vec4(0.0),vec4(1.0));"
-        " return smoothColor(inColor).rgb;"
+        " return compressHighlights(smoothColor(inColor).rgb);"
         "}"
         "vec3 applyDolbyMapping(vec3 ycc){"
         " if(!uDolbyMappingEnabled) return ycc;"
         " ycc=clamp(ycc,0.0,1.0);"
         " vec3 mapped;"
-        " mapped.r=(uDolbyMappingKind.x==2)?texture(uDolbyI3D,ycc).r:texture(uDolbyI2D,vec2(ycc.r,0.5)).r;"
-        " mapped.g=(uDolbyMappingKind.y==2)?texture(uDolbyCt3D,ycc).r:texture(uDolbyCt2D,vec2(ycc.g,0.5)).r;"
-        " mapped.b=(uDolbyMappingKind.z==2)?texture(uDolbyCp3D,ycc).r:texture(uDolbyCp2D,vec2(ycc.b,0.5)).r;"
+        " mapped.r=(uDolbyMappingKind.x==2)?texture(uDolbyI3D,ycc).r:texture(uDolbyI2D,vec2(ycc.r,0.0)).r;"
+        " mapped.g=(uDolbyMappingKind.y==2)?texture(uDolbyCt3D,ycc).r:texture(uDolbyCt2D,vec2(ycc.g,0.0)).r;"
+        " mapped.b=(uDolbyMappingKind.z==2)?texture(uDolbyCp3D,ycc).r:texture(uDolbyCp2D,vec2(ycc.b,0.0)).r;"
         " return mapped;"
         "}"
         "vec3 dolbyYccToRgb(vec3 ycc){"
@@ -361,18 +481,17 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         " color=mix(vec3(luma),color,uColorParams.z);"
         " return pow(max(color,vec3(0.0)),vec3(uColorParams.w));"
         "}"
-        "float yNorm(uint raw){"
-        " if(uPixelFormat==2) return float(raw)/255.0;"
-        " if(uPixelFormat==3) return float(raw)/65535.0;"
-        " return float(raw)/1023.0;"
+        "float yNorm(float sampleValue){"
+        " if(uPixelFormat==1) return sampleValue*(65535.0/1023.0);"
+        " return sampleValue;"
         "}"
         "vec3 readYuvCode(vec2 uv){"
         " float y=yNorm(texture(uPlane0,uv).r);"
         " float u=0.5; float v=0.5;"
         " if(uPixelFormat==3){"
-        "   uvec2 uvp=texture(uPlane1,uv).rg;"
-        "   u=float(uvp.r)/65535.0;"
-        "   v=float(uvp.g)/65535.0;"
+        "   vec2 uvp=texture(uPlane1,uv).rg;"
+        "   u=uvp.r;"
+        "   v=uvp.g;"
         " } else {"
         "   u=yNorm(texture(uPlane1,uv).r);"
         "   v=yNorm(texture(uPlane2,uv).r);"
@@ -382,6 +501,13 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         "vec3 standardYuvToRgb(vec3 code){"
         " float y=code.r; float u=code.g; float v=code.b;"
         " bool fullRange=(uRange==2);"
+        " if(!fullRange && uPrimaries==2){"
+        "   return vec3("
+        "     1.1643835616438356*y+1.6786741071428570*v-0.9156879321591650,"
+        "     1.1643835616438356*y-0.1873261078125000*u-0.6504243220982143*v+0.3474585021265493,"
+        "     1.1643835616438356*y+2.1417723214285713*u-1.1481450750163078"
+        "   );"
+        " }"
         " if(fullRange){"
         "   u-=0.5; v-=0.5;"
         " } else if(uPixelFormat==2){"
@@ -406,10 +532,10 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
         " vec3 rgb;"
         " if(uDolbyMappingEnabled){ rgb=dolbyYccToRgb(applyDolbyMapping(ycc)); }"
         " else { rgb=standardYuvToRgb(ycc); }"
-        " if(uTransfer==2 || uDolbyVision==1){ rgb=(uDolbyVision==1 && uDolbyColorEnabled)?mapDolbyPq(rgb):mapHdrPq(rgb); }"
+        " if(uTransfer==2 || uDolbyVision==1){ rgb=(uDolbyVision==1)?mapDolbyPq(rgb):mapHdrPq(rgb); }"
         " else if(uTransfer==3){ rgb=mapHlg(rgb); }"
-        " else { rgb=applyControls(rgb); }"
-        " fragColor=vec4(clamp(rgb,0.0,1.0),1.0);"
+        " else { rgb=applyControls((vec4(rgb,1.0)*uHdrColorMat).rgb); }"
+        " fragColor=vec4(clamp(rgb,0.0,1.0),1.0)*uColorFix;"
         "}";
     GLuint fv=compileShader(GL_VERTEX_SHADER,vs), ff=compileShader(GL_FRAGMENT_SHADER,ffmpegFs);
     ffmpegProgram_ = glCreateProgram();
@@ -442,6 +568,7 @@ bool CinemaScreenRenderer::initialize(float screenWidthMeters, float screenDista
     ffmpegDolbyProfileLoc_=glGetUniformLocation(ffmpegProgram_,"uDolbyProfile");
     ffmpegHdrPowerValueLoc_=glGetUniformLocation(ffmpegProgram_,"uHdrPowerValue");
     ffmpegHdrColorMatrixLoc_=glGetUniformLocation(ffmpegProgram_,"uHdrColorMat");
+    ffmpegColorFixLoc_=glGetUniformLocation(ffmpegProgram_,"uColorFix");
     ffmpegDolbyMappingEnabledLoc_=glGetUniformLocation(ffmpegProgram_,"uDolbyMappingEnabled");
     ffmpegDolbyMappingKindLoc_=glGetUniformLocation(ffmpegProgram_,"uDolbyMappingKind");
     ffmpegDolbySampler2DLoc_[0]=glGetUniformLocation(ffmpegProgram_,"uDolbyI2D");
@@ -474,6 +601,14 @@ void CinemaScreenRenderer::setPlacement(float yawRadians, float centerX, float c
     centerY_ = centerY;
     centerZ_ = centerZ;
     curveRadians_ = curveRadians;
+    rebuildVideoMesh();
+}
+
+void CinemaScreenRenderer::setAspectRatio(float aspectRatio) {
+    const float safeAspectRatio = std::clamp(aspectRatio, 0.75f, 3.20f);
+    const float nextHalfHeight = halfWidthMeters_ / safeAspectRatio;
+    if (std::fabs(nextHalfHeight - halfHeightMeters_) <= 0.0001f) return;
+    halfHeightMeters_ = nextHalfHeight;
     rebuildVideoMesh();
 }
 
@@ -588,9 +723,32 @@ void CinemaScreenRenderer::renderVideo(
         transfer = FfmpegVideoColorTransfer::St2084;
     }
     const FourXvrHdrProfile hdrProfile = makeFourXvrHdrProfile(dolbyVision);
+    const FourXvrDisplayProfile displayProfile = makeFourXvrDisplayProfile();
     dolbyMappingTexture_.update(
         colorMetadata != nullptr ? colorMetadata->dolbyMetadata : nullptr
     );
+
+    // 4XVR's bsRenderData::SetRenderData always disables
+    // GL_FRAMEBUFFER_SRGB (0x8DB9) before drawing the video target. Decoder
+    // output and the HDR shaders are already display encoded at this point.
+    const bool framebufferSrgbWasEnabled = glIsEnabled(kFramebufferSrgbExt) == GL_TRUE;
+    if (framebufferSrgbWasEnabled) {
+        glDisable(kFramebufferSrgbExt);
+    }
+    static int fourXvrExternalOutputLogKey = -1;
+    const int fourXvrExternalOutputKey = static_cast<int>(transfer) |
+        (dolbyVision ? 1 << 8 : 0);
+    if (fourXvrExternalOutputLogKey != fourXvrExternalOutputKey) {
+        XR_LOGI(
+            "DDDVR/OpenXRColor",
+            "XR_4XVR_VIDEO_OUTPUT path=external transfer=%d dolby=%d framebufferSrgbBefore=%d framebufferSrgbDuring=%d",
+            static_cast<int>(transfer),
+            dolbyVision ? 1 : 0,
+            framebufferSrgbWasEnabled ? 1 : 0,
+            glIsEnabled(kFramebufferSrgbExt) == GL_TRUE ? 1 : 0
+        );
+        fourXvrExternalOutputLogKey = fourXvrExternalOutputKey;
+    }
 
     glUseProgram(program_);
     glUniformMatrix4fv(mvpLoc_, 1, GL_FALSE, mvp);
@@ -606,9 +764,16 @@ void CinemaScreenRenderer::renderVideo(
         hdrProfile.saturationPower,
         hdrProfile.gammaPower,
         hdrProfile.smoothAmount,
-        hdrProfile.brightness
+        hdrProfile.highlightCompression
     );
-    glUniformMatrix4fv(hdrColorMatrixLoc_, 1, GL_FALSE, kIdentityColorMatrix);
+    glUniformMatrix4fv(hdrColorMatrixLoc_, 1, GL_FALSE, displayProfile.colorMatrix);
+    glUniform4fv(colorFixLoc_, 1, displayProfile.colorFix);
+    glUniformMatrix4fv(
+        dolbyInputColorInverseLoc_,
+        1,
+        GL_FALSE,
+        kFourXvrBt2020LimitedRgbToYuv
+    );
     dolbyMappingTexture_.bind(
         dolbyMappingEnabledLoc_,
         dolbyMappingKindLoc_,
@@ -628,20 +793,33 @@ void CinemaScreenRenderer::renderVideo(
         | (dolbyProfile << 20);
     if (externalHdrLogKey_ != hdrLogKey) {
         externalHdrLogKey_ = hdrLogKey;
+        if (dolbyVision) {
+            XR_LOGI(
+                "DDDVR/OpenXRColor",
+                "XR_DOVI_INPUT_MATRIX source=4xvr-1.10.2 matrix=inverse(GetYUVMatrix(range=2,colorspace=6)) input=oes_rgb output=limited_bt2020_ycbcr"
+            );
+        }
         XR_LOGI(
             "DDDVR/OpenXRColor",
-            "XR_HDR_PROFILE source=4xvr-1.10.2 path=external transfer=%d primaries=%d range=%d dolby=%d doviProfile=%d hdrBrightness=%.3f power=(%.7f,%.7f,%.7f,%.7f) hlgProfile=%s matrix=identity xrColorSpace=UNMANAGED",
+            "XR_HDR_PROFILE source=4xvr-1.10.2 path=external transfer=%d primaries=%d range=%d dolby=%d doviProfile=%d hdrBrightness=%.3f power=(%.7f,%.7f,%.7f,%.7f) highlightCompression=%.4f hlgProfile=%s matrix=getSatCon(%.5f,%.5f,%.5f) colorFix=(%.10f,%.10f,%.10f) xrColorSpace=UNMANAGED",
             static_cast<int>(transfer),
             primaries,
             range,
             dolbyVision ? 1 : 0,
             dolbyProfile,
-            kFourXvrHdrBrightness,
+            hdrProfile.brightness,
             hdrProfile.saturationPower,
             hdrProfile.gammaPower,
             hdrProfile.smoothAmount,
-            hdrProfile.brightness,
-            dolbyProfile == 8 ? "strong" : "soft"
+            hdrProfile.highlightCompression,
+            hdrProfile.highlightCompression,
+            dolbyProfile == 8 ? "strong" : "soft",
+            displayProfile.saturation,
+            displayProfile.contrast,
+            displayProfile.brightness,
+            displayProfile.colorFix[0],
+            displayProfile.colorFix[1],
+            displayProfile.colorFix[2]
         );
     }
     glActiveTexture(GL_TEXTURE0);
@@ -656,6 +834,9 @@ void CinemaScreenRenderer::renderVideo(
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glActiveTexture(GL_TEXTURE0);
+    if (framebufferSrgbWasEnabled) {
+        glEnable(kFramebufferSrgbExt);
+    }
 }
 
 void CinemaScreenRenderer::renderFfmpegVideo(
@@ -667,6 +848,24 @@ void CinemaScreenRenderer::renderFfmpegVideo(
     float fallbackG,
     float fallbackB
 ) {
+    const bool framebufferSrgbWasEnabled = glIsEnabled(kFramebufferSrgbExt) == GL_TRUE;
+    if (framebufferSrgbWasEnabled) {
+        glDisable(kFramebufferSrgbExt);
+    }
+    static int fourXvrPlanarOutputLogKey = -1;
+    const int fourXvrPlanarOutputKey = static_cast<int>(textures.transfer) |
+        (textures.dolbyVision ? 1 << 8 : 0);
+    if (fourXvrPlanarOutputLogKey != fourXvrPlanarOutputKey) {
+        XR_LOGI(
+            "DDDVR/OpenXRColor",
+            "XR_4XVR_VIDEO_OUTPUT path=planar transfer=%d dolby=%d normalizedPlanes=1 p010Format=GL_R16_GL_RG16 framebufferSrgbBefore=%d framebufferSrgbDuring=%d",
+            static_cast<int>(textures.transfer),
+            textures.dolbyVision ? 1 : 0,
+            framebufferSrgbWasEnabled ? 1 : 0,
+            glIsEnabled(kFramebufferSrgbExt) == GL_TRUE ? 1 : 0
+        );
+        fourXvrPlanarOutputLogKey = fourXvrPlanarOutputKey;
+    }
     dolbyMappingTexture_.update(textures.dolbyMetadata);
     glUseProgram(ffmpegProgram_);
     glUniformMatrix4fv(ffmpegMvpLoc_, 1, GL_FALSE, mvp);
@@ -681,14 +880,16 @@ void CinemaScreenRenderer::renderFfmpegVideo(
     glUniform1i(ffmpegDolbyLoc_, textures.dolbyVision ? 1 : 0);
     glUniform1i(ffmpegDolbyProfileLoc_, textures.dolbyProfile);
     const FourXvrHdrProfile hdrProfile = makeFourXvrHdrProfile(textures.dolbyVision);
+    const FourXvrDisplayProfile displayProfile = makeFourXvrDisplayProfile();
     glUniform4f(
         ffmpegHdrPowerValueLoc_,
         hdrProfile.saturationPower,
         hdrProfile.gammaPower,
         hdrProfile.smoothAmount,
-        hdrProfile.brightness
+        hdrProfile.highlightCompression
     );
-    glUniformMatrix4fv(ffmpegHdrColorMatrixLoc_, 1, GL_FALSE, kIdentityColorMatrix);
+    glUniformMatrix4fv(ffmpegHdrColorMatrixLoc_, 1, GL_FALSE, displayProfile.colorMatrix);
+    glUniform4fv(ffmpegColorFixLoc_, 1, displayProfile.colorFix);
     dolbyMappingTexture_.bind(
         ffmpegDolbyMappingEnabledLoc_,
         ffmpegDolbyMappingKindLoc_,
@@ -710,18 +911,25 @@ void CinemaScreenRenderer::renderFfmpegVideo(
         planarHdrLogKey_ = hdrLogKey;
         XR_LOGI(
             "DDDVR/OpenXRColor",
-            "XR_HDR_PROFILE source=4xvr-1.10.2 path=planar transfer=%d primaries=%d range=%d dolby=%d doviProfile=%d hdrBrightness=%.3f power=(%.7f,%.7f,%.7f,%.7f) hlgProfile=%s matrix=identity xrColorSpace=UNMANAGED",
+            "XR_HDR_PROFILE source=4xvr-1.10.2 path=planar transfer=%d primaries=%d range=%d dolby=%d doviProfile=%d hdrBrightness=%.3f power=(%.7f,%.7f,%.7f,%.7f) highlightCompression=%.4f hlgProfile=%s matrix=getSatCon(%.5f,%.5f,%.5f) colorFix=(%.10f,%.10f,%.10f) xrColorSpace=UNMANAGED",
             static_cast<int>(textures.transfer),
             static_cast<int>(textures.primaries),
             static_cast<int>(textures.range),
             textures.dolbyVision ? 1 : 0,
             textures.dolbyProfile,
-            kFourXvrHdrBrightness,
+            hdrProfile.brightness,
             hdrProfile.saturationPower,
             hdrProfile.gammaPower,
             hdrProfile.smoothAmount,
-            hdrProfile.brightness,
-            textures.dolbyProfile == 8 ? "strong" : "soft"
+            hdrProfile.highlightCompression,
+            hdrProfile.highlightCompression,
+            textures.dolbyProfile == 8 ? "strong" : "soft",
+            displayProfile.saturation,
+            displayProfile.contrast,
+            displayProfile.brightness,
+            displayProfile.colorFix[0],
+            displayProfile.colorFix[1],
+            displayProfile.colorFix[2]
         );
     }
 
@@ -744,6 +952,9 @@ void CinemaScreenRenderer::renderFfmpegVideo(
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glActiveTexture(GL_TEXTURE0);
+    if (framebufferSrgbWasEnabled) {
+        glEnable(kFramebufferSrgbExt);
+    }
 }
 
 void CinemaScreenRenderer::renderUiOverlay(

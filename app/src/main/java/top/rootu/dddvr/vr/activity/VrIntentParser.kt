@@ -47,24 +47,36 @@ object VrIntentParser {
         val layoutToken = normalizeToken(rawStereoLayout)
         val layout = when (layoutToken) {
             "mono", "2d", "flat", "normal" -> StereoLayout.MONO
-            "sbs", "hsbs", "fsbs", "side_by_side", "lr", "left_right" -> StereoLayout.SBS
-            "ou", "hou", "tb", "htb", "top_bottom", "over_under", "above_below", "ab" -> StereoLayout.OU
+            "sbs", "hsbs", "fsbs", "half_sbs", "full_sbs", "side_by_side", "lr", "left_right" -> StereoLayout.SBS
+            "ou", "hou", "fou", "tb", "htb", "ftb", "half_ou", "full_ou", "half_tb", "full_tb", "top_bottom", "over_under", "above_below", "ab" -> StereoLayout.OU
             else -> StereoLayout.MONO
         }
         val hasStereoLayoutExtra = layoutToken in setOf(
             "mono", "2d", "flat", "normal",
-            "sbs", "hsbs", "fsbs", "side_by_side", "lr", "left_right",
-            "ou", "hou", "tb", "htb", "top_bottom", "over_under", "above_below", "ab"
+            "sbs", "hsbs", "fsbs", "half_sbs", "full_sbs", "side_by_side", "lr", "left_right",
+            "ou", "hou", "fou", "tb", "htb", "ftb", "half_ou", "full_ou", "half_tb", "full_tb", "top_bottom", "over_under", "above_below", "ab"
         )
-        val packing = when (normalizeToken(intent.getStringExtra(EXTRA_STEREO_PACKING))) {
-            "half", "h", "half_width", "half_height" -> StereoPacking.HALF
+        val packingToken = normalizeToken(intent.getStringExtra(EXTRA_STEREO_PACKING))
+        val stereoToken = normalizeToken(rawStereoMode ?: rawStereoLayout)
+        val sourceName = uri.lastPathSegment.orEmpty().lowercase(Locale.ROOT)
+        val fullPackingInName = Regex("full[-_. ]?(sbs|ou|tb)").containsMatchIn(sourceName) ||
+            Regex("(^|[^a-z0-9])f(sbs|ou|tb)([^a-z0-9]|$)").containsMatchIn(sourceName)
+        val halfPackingInName = Regex("half[-_. ]?(sbs|ou|tb)").containsMatchIn(sourceName) ||
+            Regex("(^|[^a-z0-9])h(sbs|ou|tb)([^a-z0-9]|$)").containsMatchIn(sourceName)
+        val packing = when {
+            packingToken in setOf("half", "h", "half_width", "half_height") -> StereoPacking.HALF
+            packingToken in setOf("full", "f", "full_width", "full_height") -> StereoPacking.FULL
+            stereoToken in setOf("fsbs", "fou", "ftb", "full_sbs", "full_ou", "full_tb") || fullPackingInName -> StereoPacking.FULL
+            stereoToken in setOf("hsbs", "hou", "htb", "half_sbs", "half_ou", "half_tb") || halfPackingInName -> StereoPacking.HALF
+            mode == StereoInputMode.VR_CAM_V1 || mode == StereoInputMode.VR_CAM_V2 -> StereoPacking.FULL
+            mode != StereoInputMode.MONO -> StereoPacking.HALF
             else -> StereoPacking.FULL
         }
         val hasVrProjectionExtra = intent.hasExtra(EXTRA_VR_PROJECTION)
         val projectionMode = parseProjectionMode(intent.getStringExtra(EXTRA_VR_PROJECTION))
         val swapEyes = intent.getBooleanExtra(EXTRA_SWAP_EYES, false)
         runCatching {
-            Log.i("DDDVR/Intent", "uri=$uri stereo=$mode projection=$projection vrProjection=$projectionMode startMs=$startPositionMs type=${intent.type}")
+            Log.i("DDDVR/Intent", "uri=$uri stereo=$mode packing=$packing projection=$projection vrProjection=$projectionMode startMs=$startPositionMs type=${intent.type}")
         }
         return VrPlaybackRequest(
             uri = uri,
@@ -87,9 +99,9 @@ object VrIntentParser {
         return when (normalizeToken(raw)) {
             null -> inferStereoInputMode(uri)
             "mono", "2d", "flat", "normal" -> StereoInputMode.MONO
-            "sbs", "hsbs", "fsbs", "side_by_side", "lr", "lrq", "left_right", "left_first" -> StereoInputMode.SBS
+            "sbs", "hsbs", "fsbs", "half_sbs", "full_sbs", "side_by_side", "lr", "lrq", "left_right", "left_first" -> StereoInputMode.SBS
             "sbs_reversed", "sbs_reverse", "sbs_rl", "rl_sbs", "rl", "rlq", "right_left", "right_first" -> StereoInputMode.SBS_REVERSED
-            "ou", "hou", "tb", "htb", "over_under", "top_bottom", "above_below", "ab", "abq" -> StereoInputMode.OU
+            "ou", "hou", "fou", "tb", "htb", "ftb", "half_ou", "full_ou", "half_tb", "full_tb", "over_under", "top_bottom", "above_below", "ab", "abq" -> StereoInputMode.OU
             "ou_reversed", "ou_reverse", "tb_reversed", "tb_reverse", "ou_ba", "tb_ba", "ba_ou", "ba_tb", "ba", "baq", "bottom_top", "below_above", "bottom_first" -> StereoInputMode.OU_REVERSED
             "vr_cam_v1", "vr_cam_1", "vrcam_v1", "vrcam1", "vr_camera_v1", "vr_camera_1" -> StereoInputMode.VR_CAM_V1
             "vr_cam_v2", "vr_cam_2", "vrcam_v2", "vrcam2", "vr_camera_v2", "vr_camera_2" -> StereoInputMode.VR_CAM_V2

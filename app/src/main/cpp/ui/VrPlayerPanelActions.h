@@ -10,6 +10,7 @@ enum class VrPlayerPanelActionType {
     ToggleVolume = 102,
     ToggleProjectionMenu = 103,
     ToggleEnvironment = 104,
+    CloseModal = 105,
 
     SetSettingsTab = 110,
 

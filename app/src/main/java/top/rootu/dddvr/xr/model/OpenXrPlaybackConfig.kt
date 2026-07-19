@@ -3,10 +3,12 @@ package top.rootu.dddvr.xr.model
 import top.rootu.dddvr.vr.activity.VrPlaybackRequest
 import top.rootu.dddvr.vr.model.ProjectionMode
 import top.rootu.dddvr.vr.model.StereoLayout
+import top.rootu.dddvr.vr.model.StereoPacking
 import top.rootu.dddvr.vr.stereo.StereoInputMode
 
 data class OpenXrPlaybackConfig(
     val stereoMode: StereoInputMode,
+    val stereoPacking: StereoPacking,
     val swapEyes: Boolean,
     val screenMode: OpenXrScreenMode,
     val startPositionMs: Long,
@@ -30,6 +32,7 @@ data class OpenXrPlaybackConfig(
             }
             return OpenXrPlaybackConfig(
                 stereoMode = effectiveStereo,
+                stereoPacking = request.vrConfig.stereoPacking,
                 swapEyes = request.vrConfig.swapEyes,
                 screenMode = mode,
                 startPositionMs = request.startPositionMs,

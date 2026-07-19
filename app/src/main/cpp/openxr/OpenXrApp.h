@@ -21,7 +21,8 @@ public:
     ~OpenXrApp();
 
     void setJavaBridge(JNIEnv* env, jobject bridge);
-    void setVideoSize(int32_t width, int32_t height);
+    void setVideoSize(int32_t width, int32_t height, float pixelWidthHeightRatio);
+    void setDisplayAspectRatio(float aspectRatio);
     void setUiState(
         bool visible,
         bool playing,
@@ -117,11 +118,13 @@ private:
     jmethodID videoSurfaceCtor_ = nullptr;
     jmethodID videoSurfaceGetSurface_ = nullptr;
     jmethodID videoSurfaceUpdateTexImage_ = nullptr;
+    jmethodID videoSurfaceTimestampNs_ = nullptr;
     jmethodID videoSurfaceSetDefaultBufferSize_ = nullptr;
     jmethodID videoSurfaceRelease_ = nullptr;
     jobject videoSurfaceRef_ = nullptr;
     jobject videoDecoderSurfaceRef_ = nullptr;
     jfloatArray videoTransformArray_ = nullptr;
+    int64_t videoSurfaceTimestampNsValue_ = -1;
     float videoTransform_[16] = {
         1.f, 0.f, 0.f, 0.f,
         0.f, 1.f, 0.f, 0.f,
@@ -130,8 +133,14 @@ private:
     };
     std::atomic<int32_t> pendingVideoWidth_{0};
     std::atomic<int32_t> pendingVideoHeight_{0};
+    std::atomic<float> pendingVideoPixelWidthHeightRatio_{1.f};
+    std::atomic<float> pendingDisplayAspectRatio_{0.f};
     int32_t appliedVideoWidth_ = 0;
     int32_t appliedVideoHeight_ = 0;
+    int32_t appliedRendererVideoWidth_ = 0;
+    int32_t appliedRendererVideoHeight_ = 0;
+    float appliedRendererPixelWidthHeightRatio_ = 0.f;
+    float appliedDisplayAspectRatio_ = -1.f;
     bool videoFrameSeen_ = false;
     uint64_t videoFrameUpdateCount_ = 0;
     uint64_t videoFrameStatsBaseCount_ = 0;
